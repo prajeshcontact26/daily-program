@@ -1644,11 +1644,16 @@ export default function Home() {
       ctx.font = `bold 28px ${fontFamily}`;
       ctx.fillText("महापौर", signX + signW / 2, signY + 103);
 
-      // Bottom city line
+      // Bottom address/contact line
+      // Replace the old city line with the requested office address and contact details.
       ctx.fillStyle = isMarriage ? "#92400e" : "#475569";
-      ctx.font = `bold 21px ${fontFamily}`;
+      ctx.font = `bold 18px ${fontFamily}`;
       ctx.textAlign = "center";
-      ctx.fillText("|| श्री महाकाल की नगरी - उज्जैन ||", canvasWidth / 2, 1660);
+      ctx.fillText(
+        "पता - 1, महापौर विश्राम गृह, ग्राण्ड होटल परिसर, फ्रीगंज, उज्जैन (म.प्र.) 465010, दुरभाष - 0734-2551541 मोबाईल - 9425093592",
+        canvasWidth / 2,
+        1660
+      );
 
       // Convert canvas to A4 PDF
       const imageData = canvas.toDataURL("image/jpeg", 0.97);
