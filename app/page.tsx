@@ -976,60 +976,186 @@ export default function Home() {
     try {
       setPdfLoading(true);
 
-      // A4 Portrait PDF
       const pdf = new jsPDF({
         unit: "mm",
         format: "a4",
         orientation: "portrait",
       });
 
-      const pageWidth = 210;
-      const pageHeight = 297;
-      const margin = 8;
-      const contentWidth = pageWidth - margin * 2;
+      // =====================================================
+      // SMART DYNAMIC DESIGN
+      // Fixed 7-day design नहीं है।
+      // उस तारीख के actual programs/categories के आधार पर
+      // theme, title, icons, card style और layout बदलता है।
+      // =====================================================
 
-      // Portrait में सभी जरूरी fields को compact लेकिन readable रखा गया है।
-      const columns = [
-        { key: "sr", label: "क्र.", width: 8 },
-        { key: "time", label: "समय", width: 18 },
-        { key: "title", label: "कार्यक्रम", width: 36 },
-        { key: "sender", label: "प्रेषक का नाम", width: 28 },
-        { key: "mobile", label: "Mobile", width: 22 },
-        { key: "location", label: "कार्यक्रम का स्थान", width: 52 },
-        { key: "category", label: "श्रेणी", width: 30 },
-      ];
+      const categoryCounts: Record<string, number> = {};
 
-      // सभी columns को exact A4 Portrait content width में fit करें।
-      const widthScale =
-        contentWidth /
-        columns.reduce((sum, column) => sum + column.width, 0);
-
-      columns.forEach((column) => {
-        column.width = column.width * widthScale;
+      selectedDatePrograms.forEach((program) => {
+        categoryCounts[program.category] =
+          (categoryCounts[program.category] || 0) + 1;
       });
 
-      const getValue = (program: Program, key: string) => {
-        switch (key) {
-          case "sr":
-            return "";
-          case "time":
-            return formatTime(program.program_time);
-          case "title":
-            return program.title || "";
-          case "sender":
-            return program.sender_name || "";
-          case "mobile":
-            return program.mobile_number || "";
-          case "location":
-            return program.location || "";
-          case "category":
-            return program.category || "";
-          default:
-            return "";
+      const sortedCategories = Object.entries(categoryCounts).sort(
+        (a, b) => b[1] - a[1]
+      );
+
+      const primaryCategory =
+        sortedCategories[0]?.[0] || "अन्य";
+
+      const categoryTheme: Record<
+        string,
+        {
+          name: string;
+          subtitle: string;
+          top: string;
+          bottom: string;
+          accent: string;
+          light: string;
+          dark: string;
+          icon: string;
         }
+      > = {
+        "धार्मिक": {
+          name: "आस्था एवं धार्मिक कार्यक्रम",
+          subtitle: "उज्जैन की धार्मिक एवं आध्यात्मिक गतिविधियाँ",
+          top: "#17365d",
+          bottom: "#7c2d12",
+          accent: "#f59e0b",
+          light: "#fff7df",
+          dark: "#713f12",
+          icon: "ॐ",
+        },
+        "वैवाहिक": {
+          name: "शुभ विवाह एवं मंगल कार्यक्रम",
+          subtitle: "मंगलमय अवसरों के लिए हार्दिक शुभकामनाएँ",
+          top: "#7f1d1d",
+          bottom: "#9a3412",
+          accent: "#f59e0b",
+          light: "#fff7ed",
+          dark: "#7c2d12",
+          icon: "♥",
+        },
+        "शोक": {
+          name: "श्रद्धांजलि एवं संवेदना",
+          subtitle: "शोक संतप्त परिवार के प्रति विनम्र संवेदना",
+          top: "#334155",
+          bottom: "#0f172a",
+          accent: "#94a3b8",
+          light: "#f1f5f9",
+          dark: "#334155",
+          icon: "ॐ",
+        },
+        "नागरिक भेंट": {
+          name: "जनसंपर्क एवं नागरिक भेंट",
+          subtitle: "नागरिकों से संवाद एवं जनसेवा",
+          top: "#075985",
+          bottom: "#1d4ed8",
+          accent: "#22c55e",
+          light: "#eff6ff",
+          dark: "#1e3a8a",
+          icon: "👥",
+        },
+        "शासकीय": {
+          name: "शासकीय कार्यक्रम",
+          subtitle: "शासकीय दायित्व एवं सार्वजनिक कार्य",
+          top: "#1e3a8a",
+          bottom: "#1e40af",
+          accent: "#f59e0b",
+          light: "#eff6ff",
+          dark: "#1e3a8a",
+          icon: "🏛",
+        },
+        "कार्यालयीन कार्य": {
+          name: "कार्यालयीन कार्य",
+          subtitle: "कार्यालयीन कार्य एवं प्रशासनिक गतिविधियाँ",
+          top: "#0f3b5f",
+          bottom: "#1e40af",
+          accent: "#38bdf8",
+          light: "#eff6ff",
+          dark: "#0f3b5f",
+          icon: "▣",
+        },
+        "बैठक": {
+          name: "बैठक एवं विचार-विमर्श",
+          subtitle: "बैठक, समीक्षा एवं महत्वपूर्ण चर्चा",
+          top: "#312e81",
+          bottom: "#4338ca",
+          accent: "#a78bfa",
+          light: "#eef2ff",
+          dark: "#312e81",
+          icon: "◉",
+        },
+        "दौरा": {
+          name: "दौरा एवं भ्रमण",
+          subtitle: "क्षेत्रीय दौरा एवं जनहित गतिविधियाँ",
+          top: "#065f46",
+          bottom: "#047857",
+          accent: "#fbbf24",
+          light: "#ecfdf5",
+          dark: "#065f46",
+          icon: "➤",
+        },
+        "निरीक्षण": {
+          name: "निरीक्षण एवं समीक्षा",
+          subtitle: "स्थलीय निरीक्षण एवं कार्यों की समीक्षा",
+          top: "#713f12",
+          bottom: "#a16207",
+          accent: "#f97316",
+          light: "#fffbeb",
+          dark: "#713f12",
+          icon: "✓",
+        },
+        "पार्टी": {
+          name: "सामाजिक एवं पार्टी कार्यक्रम",
+          subtitle: "सामाजिक सहभागिता एवं सार्वजनिक कार्यक्रम",
+          top: "#701a75",
+          bottom: "#86198f",
+          accent: "#f472b6",
+          light: "#fdf4ff",
+          dark: "#701a75",
+          icon: "★",
+        },
+        "कार्यक्रम": {
+          name: "विशेष कार्यक्रम",
+          subtitle: "दैनिक महत्वपूर्ण कार्यक्रम एवं गतिविधियाँ",
+          top: "#0c4a6e",
+          bottom: "#0369a1",
+          accent: "#fbbf24",
+          light: "#f0f9ff",
+          dark: "#0c4a6e",
+          icon: "◆",
+        },
+        "अन्य": {
+          name: "दैनिक कार्यक्रम",
+          subtitle: "आज के निर्धारित कार्यक्रम एवं गतिविधियाँ",
+          top: "#1e3a8a",
+          bottom: "#3730a3",
+          accent: "#60a5fa",
+          light: "#eff6ff",
+          dark: "#1e3a8a",
+          icon: "◆",
+        },
       };
 
-      // Hindi/Devanagari text के लिए browser canvas rendering।
+      // यदि दिन में कई categories हैं तो mixed theme रखें।
+      const theme =
+        sortedCategories.length > 1
+          ? {
+              name: "दैनिक कार्यक्रम एवं जनसेवा",
+              subtitle: `${sortedCategories
+                .slice(0, 3)
+                .map(([name]) => name)
+                .join(" • ")}${sortedCategories.length > 3 ? " • अन्य" : ""}`,
+              top: "#0f3b5f",
+              bottom: "#1e40af",
+              accent: "#f59e0b",
+              light: "#eff6ff",
+              dark: "#0f3b5f",
+              icon: "✦",
+            }
+          : categoryTheme[primaryCategory] || categoryTheme["अन्य"];
+
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
 
@@ -1037,28 +1163,44 @@ export default function Home() {
         throw new Error("Canvas उपलब्ध नहीं है।");
       }
 
-      // A4 Portrait ratio: 210 : 297
-      const canvasWidth = 1131;
-      const canvasHeight = 1600;
+      const canvasWidth = 1240;
+      const canvasHeight = 1754;
       canvas.width = canvasWidth;
       canvas.height = canvasHeight;
 
-      const drawWrappedCanvas = (
+      const fontFamily = '"Nirmala UI", "Mangal", Arial, sans-serif';
+
+      const roundRect = (
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        r: number
+      ) => {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+      };
+
+      const drawWrapped = (
         value: string,
         x: number,
         y: number,
         maxWidth: number,
         lineHeight: number,
-        font: string
+        font: string,
+        align: CanvasTextAlign = "left",
+        maxLines = 3
       ) => {
         ctx.font = font;
-        ctx.textAlign = "left";
+        ctx.textAlign = align;
         ctx.textBaseline = "middle";
 
-        const textValue = String(value || "");
-        if (!textValue) return;
-
-        const chars = Array.from(textValue);
+        const chars = Array.from(String(value || ""));
         const lines: string[] = [];
         let current = "";
 
@@ -1078,7 +1220,6 @@ export default function Home() {
 
         if (current) lines.push(current);
 
-        const maxLines = 2;
         const visibleLines = lines.slice(0, maxLines);
 
         visibleLines.forEach((line, index) => {
@@ -1089,195 +1230,696 @@ export default function Home() {
             lines.length > maxLines &&
             displayLine.length > 2
           ) {
-            displayLine =
-              displayLine.slice(0, Math.max(1, displayLine.length - 1)) +
-              "…";
+            displayLine = displayLine.slice(0, -1) + "…";
           }
 
           ctx.fillText(
             displayLine,
             x,
-            y + (index - (visibleLines.length - 1) / 2) * lineHeight
+            y + index * lineHeight
           );
         });
       };
 
-      const recordsPerPage = 8;
+      // =====================================================
+      // BACKGROUND
+      // =====================================================
+
+      const bg = ctx.createLinearGradient(
+        0,
+        0,
+        canvasWidth,
+        canvasHeight
+      );
+
+      bg.addColorStop(0, theme.light);
+      bg.addColorStop(0.55, "#ffffff");
+      bg.addColorStop(1, "#f8fafc");
+
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+      // Soft decorative circles
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = theme.accent;
+
+      ctx.beginPath();
+      ctx.arc(80, 170, 230, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(canvasWidth - 50, 420, 250, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(100, canvasHeight - 50, 280, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = 1;
+
+      // =====================================================
+      // HEADER
+      // =====================================================
+
+      const headerH = 285;
+
+      const headerGradient = ctx.createLinearGradient(
+        0,
+        0,
+        canvasWidth,
+        headerH
+      );
+
+      headerGradient.addColorStop(0, theme.top);
+      headerGradient.addColorStop(1, theme.bottom);
+
+      ctx.fillStyle = headerGradient;
+      ctx.fillRect(0, 0, canvasWidth, headerH);
+
+      // Gold accent strip
+      ctx.fillStyle = theme.accent;
+      ctx.fillRect(0, headerH - 10, canvasWidth, 10);
+
+      // Header decorative circle
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.beginPath();
+      ctx.arc(1100, 40, 210, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Icon
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `bold 62px ${fontFamily}`;
+      ctx.textAlign = "left";
+      ctx.fillText(theme.icon, 55, 75);
+
+      // Main office heading
+      ctx.font = `bold 42px ${fontFamily}`;
+      ctx.fillText(
+        "दैनिक कार्यक्रम प्रबंधन",
+        55,
+        135
+      );
+
+      ctx.font = `22px ${fontFamily}`;
+      ctx.fillStyle = "#dbeafe";
+      ctx.fillText(
+        "Daily Program Management System",
+        58,
+        170
+      );
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `bold 31px ${fontFamily}`;
+      ctx.fillText(
+        theme.name,
+        58,
+        225
+      );
+
+      ctx.fillStyle = "#e2e8f0";
+      ctx.font = `19px ${fontFamily}`;
+      ctx.fillText(
+        theme.subtitle,
+        60,
+        258
+      );
+
+      // Date badge
+      const dateText = formatDate(selectedDate);
+      const badgeW = 500;
+      const badgeH = 72;
+      const badgeX = canvasWidth - badgeW - 50;
+      const badgeY = 75;
+
+      ctx.fillStyle = "rgba(255,255,255,0.14)";
+      roundRect(badgeX + 6, badgeY + 7, badgeW, badgeH, 18);
+      ctx.fill();
+
+      ctx.fillStyle = "#ffffff";
+      roundRect(badgeX, badgeY, badgeW, badgeH, 18);
+      ctx.fill();
+
+      ctx.fillStyle = theme.dark;
+      ctx.font = `bold 24px ${fontFamily}`;
+      ctx.textAlign = "center";
+      ctx.fillText(
+        dateText,
+        badgeX + badgeW / 2,
+        badgeY + 43
+      );
+
+      // Count badge
+      const countY = 205;
+      ctx.fillStyle = theme.accent;
+      ctx.beginPath();
+      ctx.arc(badgeX + 28, countY, 23, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = theme.dark;
+      ctx.font = `bold 19px ${fontFamily}`;
+      ctx.textAlign = "center";
+      ctx.fillText(
+        String(selectedDatePrograms.length),
+        badgeX + 28,
+        countY + 1
+      );
+
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `bold 18px ${fontFamily}`;
+      ctx.fillText(
+        "कुल निर्धारित कार्यक्रम",
+        badgeX + 62,
+        countY + 6
+      );
+
+      // =====================================================
+      // CATEGORY SUMMARY
+      // =====================================================
+
+      const summaryY = 325;
+
+      ctx.fillStyle = "#ffffff";
+      ctx.shadowColor = "rgba(15,23,42,0.12)";
+      ctx.shadowBlur = 18;
+      ctx.shadowOffsetY = 5;
+      roundRect(45, summaryY, canvasWidth - 90, 105, 24);
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      ctx.fillStyle = theme.dark;
+      ctx.font = `bold 20px ${fontFamily}`;
+      ctx.textAlign = "left";
+      ctx.fillText(
+        "आज की गतिविधियाँ",
+        75,
+        summaryY + 35
+      );
+
+      let summaryX = 75;
+      const maxSummary = Math.min(sortedCategories.length, 4);
+
+      for (let i = 0; i < maxSummary; i++) {
+        const [category, count] = sortedCategories[i];
+
+        const label =
+          `${category} (${count})`;
+
+        ctx.font = `16px ${fontFamily}`;
+        const pillW = Math.min(
+          250,
+          Math.max(125, ctx.measureText(label).width + 35)
+        );
+
+        if (summaryX + pillW > canvasWidth - 70) break;
+
+        ctx.fillStyle =
+          i === 0
+            ? theme.accent
+            : "#e2e8f0";
+
+        roundRect(
+          summaryX,
+          summaryY + 52,
+          pillW,
+          38,
+          19
+        );
+        ctx.fill();
+
+        ctx.fillStyle =
+          i === 0
+            ? theme.dark
+            : "#475569";
+
+        ctx.textAlign = "center";
+        ctx.fillText(
+          label,
+          summaryX + pillW / 2,
+          summaryY + 72
+        );
+
+        summaryX += pillW + 10;
+      }
+
+      // =====================================================
+      // PROGRAM CARDS
+      // =====================================================
+
+      const startY = 455;
+      const side = 55;
+      const cardW = canvasWidth - side * 2;
+      const cardH =
+        selectedDatePrograms.length <= 5
+          ? 205
+          : selectedDatePrograms.length <= 8
+          ? 175
+          : 142;
+
+      const gap = 18;
+
+      selectedDatePrograms.forEach((program, index) => {
+        const y = startY + index * (cardH + gap);
+
+        // New page if required
+        if (y + cardH > canvasHeight - 105) {
+          // This branch is handled below through page generation.
+        }
+      });
+
+      // For a long day, create pages with the same dynamically selected theme.
+      const recordsPerPage =
+        selectedDatePrograms.length <= 5
+          ? 5
+          : selectedDatePrograms.length <= 8
+          ? 6
+          : 8;
+
       const totalPages = Math.ceil(
         selectedDatePrograms.length / recordsPerPage
       );
 
-      const drawPage = (
+      const drawProgramPage = (
         pagePrograms: Program[],
         pageNumber: number
       ) => {
+        // First page keeps header + summary. Other pages use compact header.
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-        // Header
-        ctx.textBaseline = "alphabetic";
-        ctx.textAlign = "center";
-
-        ctx.fillStyle = "#1e40af";
-        ctx.font =
-          'bold 38px "Nirmala UI", "Mangal", Arial, sans-serif';
-        ctx.fillText(
-          "दैनिक कार्यक्रम प्रबंधन",
-          canvasWidth / 2,
-          55
+        // Background
+        const pageBg = ctx.createLinearGradient(
+          0,
+          0,
+          canvasWidth,
+          canvasHeight
         );
+        pageBg.addColorStop(0, theme.light);
+        pageBg.addColorStop(0.5, "#ffffff");
+        pageBg.addColorStop(1, "#f8fafc");
 
-        ctx.fillStyle = "#475569";
-        ctx.font =
-          '18px "Nirmala UI", "Mangal", Arial, sans-serif';
-        ctx.fillText(
-          `दैनिक कार्यक्रम रिपोर्ट — ${formatDate(selectedDate)}`,
-          canvasWidth / 2,
-          86
-        );
+        ctx.fillStyle = pageBg;
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-        ctx.fillStyle = "#111827";
-        ctx.font =
-          'bold 18px "Nirmala UI", "Mangal", Arial, sans-serif';
-        ctx.fillText(
-          `कुल कार्यक्रम: ${selectedDatePrograms.length}`,
-          canvasWidth / 2,
-          116
-        );
+        if (pageNumber === 1) {
+          // Re-draw first page header and summary by calling the
+          // same drawing logic inline.
 
-        // Table
-        const tableX = 30;
-        const tableY = 145;
-        const headerH = 58;
-        const rowH = 145;
-
-        const scaleX = canvasWidth / pageWidth;
-        const canvasColWidths = columns.map(
-          (column) => column.width * scaleX
-        );
-
-        const totalTableWidth = canvasColWidths.reduce(
-          (a, b) => a + b,
-          0
-        );
-
-        let x = tableX;
-
-        // Header
-        ctx.fillStyle = "#dbeafe";
-        ctx.fillRect(
-          tableX,
-          tableY,
-          totalTableWidth,
-          headerH
-        );
-
-        ctx.strokeStyle = "#64748b";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(
-          tableX,
-          tableY,
-          totalTableWidth,
-          headerH
-        );
-
-        columns.forEach((column, index) => {
-          const w = canvasColWidths[index];
-
-          ctx.strokeRect(
-            x,
-            tableY,
-            w,
+          const headerGradient2 = ctx.createLinearGradient(
+            0,
+            0,
+            canvasWidth,
             headerH
           );
+          headerGradient2.addColorStop(0, theme.top);
+          headerGradient2.addColorStop(1, theme.bottom);
 
-          drawWrappedCanvas(
-            column.label,
-            x + 5,
-            tableY + headerH / 2,
-            w - 10,
-            18,
-            'bold 16px "Nirmala UI", "Mangal", Arial, sans-serif'
+          ctx.fillStyle = headerGradient2;
+          ctx.fillRect(0, 0, canvasWidth, headerH);
+
+          ctx.fillStyle = theme.accent;
+          ctx.fillRect(0, headerH - 10, canvasWidth, 10);
+
+          ctx.fillStyle = "#ffffff";
+          ctx.font = `bold 42px ${fontFamily}`;
+          ctx.textAlign = "left";
+          ctx.fillText(
+            "दैनिक कार्यक्रम प्रबंधन",
+            55,
+            135
           );
 
-          x += w;
-        });
-
-        // Rows
-        pagePrograms.forEach((program, rowIndex) => {
-          const rowY = tableY + headerH + rowIndex * rowH;
-
-          ctx.fillStyle =
-            rowIndex % 2 === 0 ? "#ffffff" : "#f8fafc";
-
-          ctx.fillRect(
-            tableX,
-            rowY,
-            totalTableWidth,
-            rowH
+          ctx.font = `bold 31px ${fontFamily}`;
+          ctx.fillText(
+            theme.name,
+            58,
+            225
           );
 
-          x = tableX;
+          ctx.fillStyle = "#e2e8f0";
+          ctx.font = `19px ${fontFamily}`;
+          ctx.fillText(
+            theme.subtitle,
+            60,
+            258
+          );
 
-          columns.forEach((column, colIndex) => {
-            const w = canvasColWidths[colIndex];
+          ctx.fillStyle = "#ffffff";
+          roundRect(
+            canvasWidth - 550,
+            75,
+            500,
+            72,
+            18
+          );
+          ctx.fill();
 
-            ctx.strokeStyle = "#94a3b8";
-            ctx.lineWidth = 1;
-            ctx.strokeRect(
-              x,
-              rowY,
-              w,
-              rowH
+          ctx.fillStyle = theme.dark;
+          ctx.font = `bold 24px ${fontFamily}`;
+          ctx.textAlign = "center";
+          ctx.fillText(
+            dateText,
+            canvasWidth - 300,
+            118
+          );
+
+          ctx.fillStyle = "#ffffff";
+          ctx.font = `bold 18px ${fontFamily}`;
+          ctx.textAlign = "left";
+          ctx.fillText(
+            `कुल कार्यक्रम: ${selectedDatePrograms.length}`,
+            canvasWidth - 540,
+            205
+          );
+
+          // Summary
+          ctx.fillStyle = "#ffffff";
+          ctx.shadowColor = "rgba(15,23,42,0.12)";
+          ctx.shadowBlur = 18;
+          ctx.shadowOffsetY = 5;
+          roundRect(45, summaryY, canvasWidth - 90, 105, 24);
+          ctx.fill();
+          ctx.shadowColor = "transparent";
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetY = 0;
+
+          ctx.fillStyle = theme.dark;
+          ctx.font = `bold 20px ${fontFamily}`;
+          ctx.textAlign = "left";
+          ctx.fillText(
+            "आज की गतिविधियाँ",
+            75,
+            summaryY + 35
+          );
+
+          let sx = 75;
+
+          sortedCategories.slice(0, 4).forEach(
+            ([category, count], i) => {
+              const label = `${category} (${count})`;
+
+              ctx.font = `16px ${fontFamily}`;
+              const pw = Math.min(
+                250,
+                Math.max(125, ctx.measureText(label).width + 35)
+              );
+
+              if (sx + pw <= canvasWidth - 70) {
+                ctx.fillStyle =
+                  i === 0
+                    ? theme.accent
+                    : "#e2e8f0";
+
+                roundRect(
+                  sx,
+                  summaryY + 52,
+                  pw,
+                  38,
+                  19
+                );
+                ctx.fill();
+
+                ctx.fillStyle =
+                  i === 0
+                    ? theme.dark
+                    : "#475569";
+
+                ctx.textAlign = "center";
+                ctx.fillText(
+                  label,
+                  sx + pw / 2,
+                  summaryY + 72
+                );
+
+                sx += pw + 10;
+              }
+            }
+          );
+        } else {
+          // Compact header for continuation pages
+          const compact = ctx.createLinearGradient(
+            0,
+            0,
+            canvasWidth,
+            130
+          );
+          compact.addColorStop(0, theme.top);
+          compact.addColorStop(1, theme.bottom);
+
+          ctx.fillStyle = compact;
+          ctx.fillRect(0, 0, canvasWidth, 130);
+
+          ctx.fillStyle = theme.accent;
+          ctx.fillRect(0, 120, canvasWidth, 10);
+
+          ctx.fillStyle = "#ffffff";
+          ctx.font = `bold 31px ${fontFamily}`;
+          ctx.textAlign = "left";
+          ctx.fillText(
+            theme.name,
+            55,
+            62
+          );
+
+          ctx.font = `18px ${fontFamily}`;
+          ctx.fillText(
+            `${dateText}  •  पृष्ठ ${pageNumber}`,
+            58,
+            98
+          );
+        }
+
+        const localCardH =
+          pageNumber === 1
+            ? pagePrograms.length <= 5
+              ? 205
+              : pagePrograms.length <= 6
+              ? 175
+              : 145
+            : pagePrograms.length <= 6
+            ? 220
+            : 180;
+
+        const localGap = 16;
+        const localStart =
+          pageNumber === 1
+            ? 455
+            : 170;
+
+        pagePrograms.forEach(
+          (program, rowIndex) => {
+            const y =
+              localStart +
+              rowIndex * (localCardH + localGap);
+
+            // Card shadow
+            ctx.fillStyle =
+              "rgba(15,23,42,0.13)";
+            roundRect(
+              side + 8,
+              y + 8,
+              cardW,
+              localCardH,
+              22
+            );
+            ctx.fill();
+
+            // Main card
+            const cardGradient =
+              ctx.createLinearGradient(
+                side,
+                y,
+                side + cardW,
+                y + localCardH
+              );
+
+            cardGradient.addColorStop(
+              0,
+              "#ffffff"
+            );
+            cardGradient.addColorStop(
+              1,
+              theme.light
             );
 
-            let value = getValue(
-              program,
-              column.key
+            ctx.fillStyle = cardGradient;
+            roundRect(
+              side,
+              y,
+              cardW,
+              localCardH,
+              22
+            );
+            ctx.fill();
+
+            // Left category/time panel
+            const panelW = 210;
+
+            ctx.fillStyle = theme.dark;
+            roundRect(
+              side,
+              y,
+              panelW,
+              localCardH,
+              22
+            );
+            ctx.fill();
+
+            // Remove rounding visually on right side of panel
+            ctx.fillRect(
+              side + panelW - 22,
+              y,
+              22,
+              localCardH
             );
 
-            if (column.key === "sr") {
-              value = String(
-                (pageNumber - 1) * recordsPerPage +
+            // Serial
+            ctx.fillStyle = theme.accent;
+            ctx.beginPath();
+            ctx.arc(
+              side + 48,
+              y + 45,
+              26,
+              0,
+              Math.PI * 2
+            );
+            ctx.fill();
+
+            ctx.fillStyle = theme.dark;
+            ctx.font =
+              `bold 18px ${fontFamily}`;
+            ctx.textAlign = "center";
+            ctx.fillText(
+              String(
+                (pageNumber - 1) *
+                  recordsPerPage +
                   rowIndex +
                   1
+              ),
+              side + 48,
+              y + 51
+            );
+
+            // Time
+            ctx.fillStyle = "#ffffff";
+            ctx.font =
+              `bold 29px ${fontFamily}`;
+            ctx.fillText(
+              formatTime(program.program_time),
+              side + panelW / 2,
+              y + 95
+            );
+
+            ctx.fillStyle = "#cbd5e1";
+            ctx.font =
+              `14px ${fontFamily}`;
+            ctx.fillText(
+              program.category || "अन्य",
+              side + panelW / 2,
+              y + 132
+            );
+
+            // Main content
+            const contentX =
+              side + panelW + 35;
+
+            ctx.textAlign = "left";
+            ctx.fillStyle = theme.dark;
+            ctx.font =
+              `bold 24px ${fontFamily}`;
+
+            drawWrapped(
+              program.title || "कार्यक्रम",
+              contentX,
+              y + 45,
+              cardW - panelW - 70,
+              29,
+              `bold 24px ${fontFamily}`,
+              "left",
+              2
+            );
+
+            // Location
+            ctx.fillStyle = "#475569";
+            ctx.font =
+              `17px ${fontFamily}`;
+
+            drawWrapped(
+              `📍 ${program.location || "स्थान उपलब्ध नहीं"}`,
+              contentX,
+              y + 105,
+              cardW - panelW - 70,
+              22,
+              `17px ${fontFamily}`,
+              "left",
+              2
+            );
+
+            // Sender / mobile
+            const extra =
+              [
+                program.sender_name
+                  ? `👤 ${program.sender_name}`
+                  : "",
+                program.mobile_number
+                  ? `📱 ${program.mobile_number}`
+                  : "",
+              ]
+                .filter(Boolean)
+                .join("   ");
+
+            if (extra) {
+              ctx.fillStyle = "#64748b";
+              ctx.font =
+                `15px ${fontFamily}`;
+
+              drawWrapped(
+                extra,
+                contentX,
+                y + localCardH - 32,
+                cardW - panelW - 70,
+                20,
+                `15px ${fontFamily}`,
+                "left",
+                1
               );
             }
 
-            const font =
-              column.key === "title"
-                ? 'bold 16px "Nirmala UI", "Mangal", Arial, sans-serif'
-                : '15px "Nirmala UI", "Mangal", Arial, sans-serif';
-
-            ctx.fillStyle = "#111827";
-
-            drawWrappedCanvas(
-              value,
-              x + 5,
-              rowY + rowH / 2,
-              w - 10,
-              20,
-              font
+            // Category accent line
+            ctx.fillStyle = theme.accent;
+            roundRect(
+              side + panelW + 35,
+              y + localCardH - 12,
+              Math.min(
+                130,
+                cardW - panelW - 70
+              ),
+              5,
+              3
             );
-
-            x += w;
-          });
-        });
+            ctx.fill();
+          }
+        );
 
         // Footer
-        ctx.textAlign = "center";
         ctx.fillStyle = "#64748b";
         ctx.font =
-          '14px "Nirmala UI", "Mangal", Arial, sans-serif';
-
+          `14px ${fontFamily}`;
+        ctx.textAlign = "center";
         ctx.fillText(
-          `दैनिक कार्यक्रम प्रबंधन प्रणाली  |  पृष्ठ ${pageNumber} / ${totalPages}`,
+          `दैनिक कार्यक्रम प्रबंधन प्रणाली  •  ${dateText}  •  पृष्ठ ${pageNumber}/${totalPages}`,
           canvasWidth / 2,
-          canvasHeight - 28
+          canvasHeight - 32
         );
       };
 
-      for (let page = 0; page < totalPages; page++) {
+      for (
+        let page = 0;
+        page < totalPages;
+        page++
+      ) {
         if (page > 0) {
           pdf.addPage();
         }
@@ -1288,7 +1930,7 @@ export default function Home() {
             (page + 1) * recordsPerPage
           );
 
-        drawPage(
+        drawProgramPage(
           pagePrograms,
           page + 1
         );
@@ -1296,7 +1938,6 @@ export default function Home() {
         const imageData =
           canvas.toDataURL("image/jpeg", 0.96);
 
-        // A4 Portrait: 210 x 297 mm
         pdf.addImage(
           imageData,
           "JPEG",
@@ -1315,12 +1956,12 @@ export default function Home() {
         .join("-");
 
       pdf.save(
-        `Daily-Program-Full-Report-${fileDate}.pdf`
+        `Daily-Program-Smart-Design-${fileDate}.pdf`
       );
     } catch (error) {
       console.error(error);
       alert(
-        "PDF download नहीं हो सकी। कृपया Console में error देखें।"
+        "Smart PDF download नहीं हो सकी। कृपया Console में error देखें।"
       );
     } finally {
       setPdfLoading(false);
