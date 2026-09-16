@@ -1597,12 +1597,7 @@ export default function Home() {
       // =====================================================
       const footerTop = 1295;
 
-      // Decorative Ujjain-style line / panel
-      ctx.fillStyle = isMarriage ? "#7c2d12" : "#334155";
-      ctx.fillRect(100, footerTop, canvasWidth - 200, 8);
-
-      ctx.fillStyle = isMarriage ? "#f59e0b" : "#94a3b8";
-      ctx.fillRect(170, footerTop + 18, canvasWidth - 340, 3);
+      // Decorative footer lines removed so there is no horizontal line behind the address.
 
       ctx.fillStyle = isMarriage ? "#991b1b" : "#475569";
       ctx.font = `bold 28px ${fontFamily}`;
