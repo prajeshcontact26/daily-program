@@ -1488,51 +1488,17 @@ export default function Home() {
         // Intentionally no separate वर/वधु name line here.
         // The groom and bride names are rendered only inside the message.
       } else {
-        // ===================================================
-        // SHOK: DECEASED PERSON NAME
-        // ===================================================
-        const boxX = 145;
-        const boxY = 385;
-        const boxW = canvasWidth - 290;
-        const boxH = 150;
-
-        ctx.fillStyle = "rgba(30, 41, 59, 0.18)";
-        ctx.fillRect(boxX + 10, boxY + 12, boxW, boxH);
-        const deceasedGradient = ctx.createLinearGradient(boxX, boxY, boxX, boxY + boxH);
-        deceasedGradient.addColorStop(0, "#f8fafc");
-        deceasedGradient.addColorStop(1, "#e2e8f0");
-        ctx.fillStyle = deceasedGradient;
-        ctx.fillRect(boxX, boxY, boxW, boxH);
-
-        ctx.strokeStyle = "#475569";
-        ctx.lineWidth = 4;
-        ctx.strokeRect(boxX, boxY, boxW, boxH);
-
-        ctx.fillStyle = "#334155";
-        ctx.font = `bold 25px ${fontFamily}`;
-        ctx.textAlign = "center";
-        ctx.fillText("स्वर्गीय", canvasWidth / 2, boxY + 40);
-
-        ctx.fillStyle = "#111827";
-        drawWrapped(
-          program.deceased_name || "नाम उपलब्ध नहीं",
-          canvasWidth / 2,
-          boxY + 92,
-          boxW - 80,
-          40,
-          `bold 34px ${fontFamily}`,
-          "center",
-          2
-        );
+        // Shok message uses the same clean layout as the wedding card.
+        // The deceased person's name is shown only inside the main message.
       }
 
       // =====================================================
       // MAIN MESSAGE
       // =====================================================
-      const messageY = isMarriage ? 430 : 585;
+      const messageY = 430;
       const messageX = 125;
       const messageW = canvasWidth - 250;
-      const messageH = isMarriage ? 650 : 620;
+      const messageH = 650;
 
       ctx.fillStyle = isMarriage ? "rgba(180,83,9,0.16)" : "rgba(51,65,85,0.16)";
       ctx.fillRect(messageX + 12, messageY + 14, messageW, messageH);
@@ -1587,7 +1553,7 @@ export default function Home() {
       } else {
         ctx.fillStyle = "#334155";
         ctx.font = `bold 38px ${fontFamily}`;
-        ctx.fillText("ॐ शांति", canvasWidth / 2, messageY + 515);
+        ctx.fillText("ॐ शांति", canvasWidth / 2, messageY + 555);
       }
 
       // =====================================================
