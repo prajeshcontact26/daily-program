@@ -1978,20 +1978,15 @@ export default function Home() {
     type: "marriage" | "condolence"
   ) => {
     try {
-      if (type === "marriage" && program.category !== "वैवाहिक") {
-        alert("यह PDF केवल वैवाहिक कार्यक्रम के लिए है।");
-        return;
-      }
-
-      if (type === "condolence" && program.category !== "शोक") {
-        alert("यह PDF केवल शोक कार्यक्रम के लिए है।");
+      if (type !== "marriage" || program.category !== "वैवाहिक") {
+        alert("यह reference design अभी वैवाहिक शुभकामना संदेश के लिए है।");
         return;
       }
 
       const pdf = new jsPDF({
         unit: "mm",
         format: "a4",
-        orientation: "portrait",
+        orientation: "landscape",
       });
 
       const canvas = document.createElement("canvas");
@@ -1999,51 +1994,78 @@ export default function Home() {
 
       if (!ctx) throw new Error("Canvas उपलब्ध नहीं है।");
 
-      const W = 1240;
-      const H = 1754;
+      // Reference background image:
+      // public/assets/shubhkamna-bg.jpg
+      const background = new Image();
+      background.src = "/assets/shubhkamna-bg.jpg";
 
+      await new Promise<void>((resolve, reject) => {
+        background.onload = () => resolve();
+        background.onerror = () =>
+          reject(
+            new Error(
+              "Background image नहीं मिली। public/assets/shubhkamna-bg.jpg रखें।"
+            )
+          );
+      });
+
+      const W = 1400;
+      const H = 990;
       canvas.width = W;
       canvas.height = H;
 
-      const fontFamily = '"Nirmala UI", "Mangal", Arial, sans-serif';
-      const isMarriage = type === "marriage";
-
-      const groom = (program.groom_name || "").trim();
-      const bride = (program.bride_name || "").trim();
-      const deceased = (program.deceased_name || "").trim();
+      const fontFamily =
+        '"Nirmala UI", "Mangal", Arial, sans-serif';
 
       // ---------------------------------------------------------
-      // Helpers
+      // 1. Supplied background image
       // ---------------------------------------------------------
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, W, H);
 
-      const roundRect = (
-        x: number,
-        y: number,
-        w: number,
-        h: number,
-        r: number
-      ) => {
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.arcTo(x + w, y, x + w, y + h, r);
-        ctx.arcTo(x + w, y + h, x, y + h, r);
-        ctx.arcTo(x, y + h, x, y, r);
-        ctx.arcTo(x, y, x + w, y, r);
-        ctx.closePath();
-      };
+      // Image को पूरे A4 landscape canvas में fit करें।
+      const imageRatio =
+        background.width / background.height;
+      const canvasRatio = W / H;
 
-      const wrapLines = (
+      let drawW = W;
+      let drawH = H;
+      let drawX = 0;
+      let drawY = 0;
+
+      if (imageRatio > canvasRatio) {
+        drawH = H;
+        drawW = H * imageRatio;
+        drawX = (W - drawW) / 2;
+      } else {
+        drawW = W;
+        drawH = W / imageRatio;
+        drawY = (H - drawH) / 2;
+      }
+
+      ctx.drawImage(
+        background,
+        drawX,
+        drawY,
+        drawW,
+        drawH
+      );
+
+      // ---------------------------------------------------------
+      // 2. Helpers
+      // ---------------------------------------------------------
+      const wrapText = (
         value: string,
         maxWidth: number,
         font: string
       ) => {
         ctx.font = font;
 
-        const words = Array.from(String(value || ""));
+        const chars = Array.from(value || "");
         const lines: string[] = [];
         let current = "";
 
-        for (const char of words) {
+        for (const char of chars) {
           const test = current + char;
 
           if (
@@ -2062,23 +2084,25 @@ export default function Home() {
         return lines;
       };
 
-      const drawWrapped = (
-        value: string,
+      const drawText = (
+        textValue: string,
         x: number,
         y: number,
         maxWidth: number,
-        lineHeight: number,
         font: string,
-        align: CanvasTextAlign = "left",
-        maxLines = 8
+        color: string,
+        lineHeight: number,
+        maxLines = 6,
+        align: CanvasTextAlign = "left"
       ) => {
-        const lines = wrapLines(value, maxWidth, font).slice(
-          0,
-          maxLines
-        );
+        const lines = wrapText(
+          textValue,
+          maxWidth,
+          font
+        ).slice(0, maxLines);
 
         ctx.font = font;
-        ctx.fillStyle = "#111827";
+        ctx.fillStyle = color;
         ctx.textAlign = align;
         ctx.textBaseline = "top";
 
@@ -2093,449 +2117,231 @@ export default function Home() {
         return lines.length;
       };
 
-      const drawCenterWrapped = (
-        value: string,
-        x: number,
-        y: number,
-        maxWidth: number,
-        lineHeight: number,
-        font: string,
-        color: string,
-        maxLines = 4
-      ) => {
-        const lines = wrapLines(value, maxWidth, font).slice(
-          0,
-          maxLines
-        );
+      // ---------------------------------------------------------
+      // 3. Dynamic data
+      // ---------------------------------------------------------
+      const groom = (program.groom_name || "").trim();
+      const bride = (program.bride_name || "").trim();
+      const recipient =
+        (program.sender_name || "").trim();
 
-        ctx.font = font;
-        ctx.fillStyle = color;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-
-        lines.forEach((line, index) => {
-          ctx.fillText(
-            line,
-            x,
-            y + index * lineHeight
-          );
-        });
-
-        return lines.length;
-      };
+      const couple =
+        groom && bride
+          ? `चि. ${groom} संग सौ.का. ${bride}`
+          : groom
+          ? `चि. ${groom}`
+          : bride
+          ? `सौ.का. ${bride}`
+          : "नवदंपत्ति";
 
       // ---------------------------------------------------------
-      // Base background
+      // 4. Text overlay
+      // Background में right side photo पहले से मौजूद है।
+      // इसलिए text area केवल left/center में रखा गया है।
       // ---------------------------------------------------------
 
-      ctx.fillStyle = isMarriage
-        ? "#fffdf8"
-        : "#f7f8fa";
+      // Header
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
 
-      ctx.fillRect(0, 0, W, H);
+      // हल्का white glow ताकि heading साफ दिखे।
+      ctx.shadowColor =
+        "rgba(255,255,255,0.95)";
+      ctx.shadowBlur = 8;
 
-      // Subtle paper texture / glow
-      const bg = ctx.createRadialGradient(
-        W / 2,
-        550,
-        80,
-        W / 2,
+      ctx.font =
+        `bold 58px ${fontFamily}`;
+      ctx.fillStyle = "#c51f1f";
+
+      ctx.fillText(
+        "शुभकामना सन्देश",
         700,
-        900
+        72
       );
 
-      if (isMarriage) {
-        bg.addColorStop(0, "rgba(255,244,190,0.62)");
-        bg.addColorStop(0.55, "rgba(255,255,255,0.28)");
-        bg.addColorStop(1, "rgba(255,247,237,0)");
-      } else {
-        bg.addColorStop(0, "rgba(203,213,225,0.48)");
-        bg.addColorStop(0.55, "rgba(255,255,255,0.25)");
-        bg.addColorStop(1, "rgba(255,255,255,0)");
-      }
-
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, W, H);
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
 
       // ---------------------------------------------------------
-      // Border — reference जैसा clean double border
+      // Recipient
       // ---------------------------------------------------------
-
-      ctx.strokeStyle = isMarriage
-        ? "#d6a62a"
-        : "#64748b";
-
-      ctx.lineWidth = 4;
-      ctx.strokeRect(28, 28, W - 56, H - 56);
-
-      ctx.strokeStyle = isMarriage
-        ? "#ead27b"
-        : "#cbd5e1";
-
-      ctx.lineWidth = 2;
-      ctx.strokeRect(42, 42, W - 84, H - 84);
-
-      // Corner decorative dots
-      const cornerColor = isMarriage
-        ? "#e0a400"
-        : "#64748b";
-
-      ctx.fillStyle = cornerColor;
-
-      [
-        [44, 44],
-        [W - 44, 44],
-        [44, H - 44],
-        [W - 44, H - 44],
-      ].forEach(([x, y]) => {
-        ctx.beginPath();
-        ctx.arc(x, y, 7, 0, Math.PI * 2);
-        ctx.fill();
-      });
-
-      // ---------------------------------------------------------
-      // Top title — reference style
-      // ---------------------------------------------------------
-
-      ctx.textAlign = "center";
-      ctx.textBaseline = "alphabetic";
-
-      ctx.fillStyle = isMarriage
-        ? "#b91c1c"
-        : "#334155";
-
-      ctx.font = `bold 52px ${fontFamily}`;
-
-      ctx.fillText(
-        isMarriage
-          ? "शुभकामना सन्देश"
-          : "शोक संवेदना सन्देश",
-        W / 2,
-        120
-      );
-
-      // Thin decorative underline
-      ctx.strokeStyle = isMarriage
-        ? "#e5b73b"
-        : "#94a3b8";
-
-      ctx.lineWidth = 3;
-
-      ctx.beginPath();
-      ctx.moveTo(270, 145);
-      ctx.lineTo(W - 270, 145);
-      ctx.stroke();
-
-      // ---------------------------------------------------------
-      // Left decorative pennants
-      // ---------------------------------------------------------
-
-      const pennantColors = isMarriage
-        ? ["#dc2626", "#16a34a", "#f59e0b", "#1d4ed8"]
-        : ["#64748b", "#94a3b8", "#475569"];
-
-      pennantColors.forEach((color, index) => {
-        const x = 70 + index * 62;
-
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.moveTo(x, 190);
-        ctx.lineTo(x + 38, 177);
-        ctx.lineTo(x + 25, 215);
-        ctx.closePath();
-        ctx.fill();
-      });
-
-      // ---------------------------------------------------------
-      // Central soft symbolic watermark
-      // ---------------------------------------------------------
-
-      ctx.globalAlpha = isMarriage ? 0.085 : 0.055;
-
-      ctx.fillStyle = isMarriage
-        ? "#92400e"
-        : "#475569";
-
-      // Trident / ॐ-inspired decorative watermark
-      ctx.font = `bold 270px ${fontFamily}`;
-      ctx.textAlign = "center";
-      ctx.fillText(
-        isMarriage ? "ॐ" : "ॐ",
-        W / 2,
-        700
-      );
-
-      ctx.globalAlpha = 1;
-
-      // ---------------------------------------------------------
-      // Left recipient section
-      // ---------------------------------------------------------
-
-      const recipientX = 92;
-
       ctx.textAlign = "left";
-      ctx.fillStyle = "#111827";
-      ctx.font = `bold 27px ${fontFamily}`;
 
-      ctx.fillText(
+      drawText(
         "श्रद्धेय,",
-        recipientX,
-        285
+        105,
+        220,
+        850,
+        `bold 30px ${fontFamily}`,
+        "#111827",
+        38,
+        1,
+        "left"
       );
 
-      // Recipient name:
-      // Existing schema में recipient अलग field नहीं है।
-      // इसलिए sender_name को उपलब्ध नाम के रूप में दिखाया जाता है।
-      // यदि sender_name खाली है तो line नहीं दिखाई जाएगी।
-      if (program.sender_name?.trim()) {
-        ctx.fillStyle = isMarriage
-          ? "#1d4ed8"
-          : "#475569";
-
-        ctx.font = `bold 27px ${fontFamily}`;
-
-        drawWrapped(
-          program.sender_name.trim(),
-          recipientX,
-          325,
-          450,
-          35,
-          `bold 27px ${fontFamily}`,
-          "left",
-          2
+      if (recipient) {
+        drawText(
+          recipient,
+          105,
+          270,
+          850,
+          `bold 34px ${fontFamily}`,
+          "#c51f1f",
+          42,
+          2,
+          "left"
         );
       }
 
       // ---------------------------------------------------------
+      // Main message — clean left column alignment
+      // ---------------------------------------------------------
+      // Right-side photo/background area को overlap न करने के लिए
+      // पूरा matter एक fixed left content column में रखा गया है।
+      const contentX = 105;
+      const contentW = 850;
+
+      // Couple name — blue highlight
+      drawText(
+        couple,
+        contentX,
+        390,
+        contentW,
+        `bold 34px ${fontFamily}`,
+        "#1748d1",
+        43,
+        2,
+        "left"
+      );
+
       // Main message
-      // ---------------------------------------------------------
+      const mainMessage =
+        "के परिणय बंधन के शुभ अवसर पर ईश्वर से यही प्रार्थना है कि नवदंपत्ति का वैवाहिक जीवन सदा सुखमय रहे। विवाह का यह पवित्र बंधन आपके कुल की वृद्धि एवं और सम्पन्नता का कारक बने।";
 
-      const messageX = 92;
-      const messageY = 450;
-      const messageW = 1060;
+      drawText(
+        mainMessage,
+        contentX,
+        475,
+        contentW,
+        `27px ${fontFamily}`,
+        "#111827",
+        40,
+        5,
+        "left"
+      );
 
-      let message = "";
-
-      if (isMarriage) {
-        const couple =
-          groom && bride
-            ? `चि. ${groom} संग सौ.का. ${bride}`
-            : groom
-            ? `चि. ${groom}`
-            : bride
-            ? `सौ.का. ${bride}`
-            : "नवदंपत्ति";
-
-        message =
-          `${couple} के परिणय बंधन के शुभ अवसर पर ईश्वर से यही प्रार्थना है कि नवदंपत्ति का वैवाहिक जीवन सदा सुखमय रहे। विवाह का यह पवित्र बंधन आपके कुल की वृद्धि एवं और सम्पन्नता का कारक बने।`;
-      } else {
-        message =
-          `स्वर्गीय ${deceased || "दिवंगत आत्मा"} के निधन का समाचार अत्यंत दुःखद एवं पीड़ादायक है। ईश्वर दिवंगत आत्मा को अपने श्रीचरणों में स्थान प्रदान करें तथा शोकाकुल परिजनों को इस अपार दुःख को सहन करने की शक्ति प्रदान करें।`;
-      }
-
-      // Highlight couple/deceased name first
-      ctx.fillStyle = isMarriage
-        ? "#1d4ed8"
-        : "#334155";
-
-      ctx.font = `bold 30px ${fontFamily}`;
-
-      if (isMarriage) {
-        const couple =
-          groom && bride
-            ? `चि. ${groom} संग सौ.का. ${bride}`
-            : groom
-            ? `चि. ${groom}`
-            : bride
-            ? `सौ.का. ${bride}`
-            : "नवदंपत्ति";
-
-        drawWrapped(
-          couple,
-          messageX,
-          messageY,
-          900,
-          40,
-          `bold 30px ${fontFamily}`,
-          "left",
-          2
-        );
-
-        drawWrapped(
-          "के परिणय बंधन के शुभ अवसर पर ईश्वर से यही प्रार्थना है कि नवदंपत्ति का वैवाहिक जीवन सदा सुखमय रहे। विवाह का यह पवित्र बंधन आपके कुल की वृद्धि एवं और सम्पन्नता का कारक बने।",
-          messageX,
-          messageY + 100,
-          messageW,
-          39,
-          `26px ${fontFamily}`,
-          "left",
-          8
-        );
-      } else {
-        const deceasedLine =
-          `स्वर्गीय ${deceased || "दिवंगत आत्मा"}`;
-
-        drawWrapped(
-          deceasedLine,
-          messageX,
-          messageY,
-          messageW,
-          40,
-          `bold 30px ${fontFamily}`,
-          "left",
-          2
-        );
-
-        drawWrapped(
-          "के निधन का समाचार अत्यंत दुःखद एवं पीड़ादायक है। ईश्वर दिवंगत आत्मा को अपने श्रीचरणों में स्थान प्रदान करें तथा शोकाकुल परिजनों को इस अपार दुःख को सहन करने की शक्ति प्रदान करें।",
-          messageX,
-          messageY + 100,
-          messageW,
-          39,
-          `26px ${fontFamily}`,
-          "left",
-          8
-        );
-      }
-
-      // Sanskrit / traditional blessing line
-      ctx.textAlign = "left";
-      ctx.fillStyle = isMarriage
-        ? "#b91c1c"
-        : "#475569";
-
-      ctx.font = `bold 28px ${fontFamily}`;
-
-      ctx.fillText(
-        isMarriage
-          ? "नवदम्पत्योः वैवाहिक जीवनं सुखमयं भवतु।"
-          : "ॐ शांति। शांति। शांति।",
-        messageX,
-        850
+      // Sanskrit blessing — left content के बीच में centered
+      drawText(
+        "नवदंपत्योः वैवाहिक जीवनं सुखमयं भवतु।",
+        contentX + contentW / 2,
+        690,
+        700,
+        `bold 34px ${fontFamily}`,
+        "#c51f1f",
+        42,
+        2,
+        "center"
       );
 
       // ---------------------------------------------------------
-      // Signature — bottom-right
+      // Signature — image के right-side photo के नीचे
       // ---------------------------------------------------------
+      drawText(
+        "शुभाकांक्षी",
+        1060,
+        650,
+        260,
+        `bold 27px ${fontFamily}`,
+        "#111827",
+        34,
+        1,
+        "center"
+      );
 
-      const signX = 790;
-      const signY = 1030;
+      drawText(
+        "(मुकेश टटवाल)",
+        1060,
+        690,
+        300,
+        `bold 30px ${fontFamily}`,
+        "#c51f1f",
+        38,
+        1,
+        "center"
+      );
+
+      drawText(
+        "महापौर, उज्जैन",
+        1060,
+        735,
+        300,
+        `bold 27px ${fontFamily}`,
+        "#111827",
+        34,
+        1,
+        "center"
+      );
+
+      // ---------------------------------------------------------
+      // Footer
+      // ---------------------------------------------------------
+      ctx.fillStyle = "rgba(255,255,255,0.90)";
+      ctx.fillRect(
+        55,
+        820,
+        W - 110,
+        55
+      );
 
       ctx.textAlign = "center";
+      ctx.font =
+        `16px ${fontFamily}`;
+      ctx.fillStyle = "#1f2937";
 
-      ctx.fillStyle = isMarriage
-        ? "#92400e"
-        : "#475569";
-
-      ctx.font = `bold 25px ${fontFamily}`;
       ctx.fillText(
-        "शुभाकांक्षी",
-        signX + 150,
-        signY
+        "Website - nagarnigamujjain.org  |  Email - mayorujjain-mp@mp.gov.in  |  nn.ujjain@mp.gov.in",
+        W / 2,
+        840
       );
 
-      ctx.font = `bold 29px ${fontFamily}`;
-      ctx.fillText(
-        "(मुकेश टटवाल),",
-        signX + 150,
-        signY + 48
+      ctx.fillStyle = "#16a34a";
+      ctx.fillRect(
+        55,
+        875,
+        W - 110,
+        50
       );
 
-      ctx.font = `bold 27px ${fontFamily}`;
+      ctx.fillStyle = "#ffffff";
+      ctx.font =
+        `bold 19px ${fontFamily}`;
+
       ctx.fillText(
-        "महापौर, उज्जैन",
-        signX + 150,
-        signY + 92
+        "छत्रपति शिवाजी भवन, आगर रोड उज्जैन (म.प्र.)",
+        W / 2,
+        890
       );
 
-      // Signature underline
-      ctx.strokeStyle = isMarriage
-        ? "#dc2626"
-        : "#94a3b8";
-
-      ctx.lineWidth = 2;
-
-      ctx.beginPath();
-      ctx.moveTo(signX - 30, signY + 125);
-      ctx.lineTo(signX + 330, signY + 125);
-      ctx.stroke();
-
-      // ---------------------------------------------------------
       // Date
-      // ---------------------------------------------------------
-
       if (program.program_date) {
+        ctx.fillStyle = "#374151";
+        ctx.font =
+          `15px ${fontFamily}`;
         ctx.textAlign = "right";
-        ctx.fillStyle = "#475569";
-        ctx.font = `18px ${fontFamily}`;
 
         ctx.fillText(
           program.program_date
             .split("-")
             .reverse()
             .join("-"),
-          W - 65,
-          H - 72
+          W - 60,
+          950
         );
       }
 
       // ---------------------------------------------------------
-      // Footer
-      // No decorative horizontal line behind address.
+      // 5. PDF
       // ---------------------------------------------------------
-
-      ctx.fillStyle = isMarriage
-        ? "#16a34a"
-        : "#475569";
-
-      const footerY = 1605;
-
-      // Website / email line
-      ctx.textAlign = "center";
-      ctx.fillStyle = "#475569";
-      ctx.font = `15px ${fontFamily}`;
-
-      ctx.fillText(
-        "Website - nagarnigamujjain.org  |  Email - mayorujjain-mp@mp.gov.in",
-        W / 2,
-        footerY
-      );
-
-      // Green official address band
-      ctx.fillStyle = isMarriage
-        ? "#16a34a"
-        : "#475569";
-
-      ctx.fillRect(
-        150,
-        footerY + 22,
-        W - 300,
-        48
-      );
-
-      ctx.fillStyle = "#ffffff";
-      ctx.font = `bold 17px ${fontFamily}`;
-
-      ctx.fillText(
-        "1, महापौर विश्राम गृह, ग्राण्ड होटल परिसर, फ्रीगंज, उज्जैन (म.प्र.) 465010",
-        W / 2,
-        footerY + 52
-      );
-
-      // Contact line below band
-      ctx.fillStyle = "#475569";
-      ctx.font = `15px ${fontFamily}`;
-
-      ctx.fillText(
-        "दुरभाष - 0734-2551541   मोबाईल - 9425093592",
-        W / 2,
-        footerY + 92
-      );
-
-      // ---------------------------------------------------------
-      // Save
-      // ---------------------------------------------------------
-
       const imageData =
         canvas.toDataURL("image/jpeg", 0.97);
 
@@ -2544,19 +2350,15 @@ export default function Home() {
         "JPEG",
         0,
         0,
-        210,
         297,
+        210,
         undefined,
         "FAST"
       );
 
-      const safeName = (
-        isMarriage
-          ? `${groom || "वर"}-${bride || "वधु"}`
-          : deceased || "शोक"
-      )
+      const safeName = couple
         .replace(/[\\/:*?"<>|]/g, "-")
-        .slice(0, 80);
+        .slice(0, 70);
 
       const datePart = program.program_date
         ? program.program_date
@@ -2566,16 +2368,12 @@ export default function Home() {
         : "date";
 
       pdf.save(
-        `${
-          isMarriage
-            ? "Shubhkamna-Sandesh"
-            : "Shok-Sandesh"
-        }-${safeName}-${datePart}.pdf`
+        `Shubhkamna-Sandesh-${safeName}-${datePart}.pdf`
       );
     } catch (error) {
       console.error(error);
       alert(
-        "संदेश PDF generate नहीं हो सकी। कृपया Console में error देखें।"
+        "शुभकामना PDF नहीं बन सकी। Background image का नाम और location check करें।"
       );
     }
   };
