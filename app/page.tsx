@@ -976,30 +976,30 @@ export default function Home() {
     try {
       setPdfLoading(true);
 
-      // Landscape A4 रखा गया है क्योंकि report में सभी fields दिखानी हैं।
+      // A4 Portrait PDF
       const pdf = new jsPDF({
         unit: "mm",
         format: "a4",
-        orientation: "landscape",
+        orientation: "portrait",
       });
 
-      const pageWidth = 297;
-      const pageHeight = 210;
+      const pageWidth = 210;
+      const pageHeight = 297;
       const margin = 8;
       const contentWidth = pageWidth - margin * 2;
 
-      // PDF में Photo Upload और अतिरिक्त विवरण जानबूझकर शामिल नहीं किए गए हैं।
+      // Portrait में सभी जरूरी fields को compact लेकिन readable रखा गया है।
       const columns = [
-        { key: "sr", label: "क्र.", width: 9 },
+        { key: "sr", label: "क्र.", width: 8 },
         { key: "time", label: "समय", width: 18 },
-        { key: "title", label: "कार्यक्रम", width: 34 },
-        { key: "sender", label: "प्रेषक का नाम", width: 27 },
-        { key: "mobile", label: "Mobile", width: 23 },
-        { key: "location", label: "कार्यक्रम का स्थान", width: 30 },
-        { key: "category", label: "श्रेणी", width: 20 },
+        { key: "title", label: "कार्यक्रम", width: 36 },
+        { key: "sender", label: "प्रेषक का नाम", width: 28 },
+        { key: "mobile", label: "Mobile", width: 22 },
+        { key: "location", label: "कार्यक्रम का स्थान", width: 52 },
+        { key: "category", label: "श्रेणी", width: 30 },
       ];
 
-      // चुने हुए columns का total width exact content width के बराबर करें।
+      // सभी columns को exact A4 Portrait content width में fit करें।
       const widthScale =
         contentWidth /
         columns.reduce((sum, column) => sum + column.width, 0);
@@ -1029,8 +1029,7 @@ export default function Home() {
         }
       };
 
-      // Hindi/Devanagari font के लिए browser canvas का image rendering
-      // इस्तेमाल किया गया है, ताकि PDF में Hindi fields सही दिखाई दें।
+      // Hindi/Devanagari text के लिए browser canvas rendering।
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
 
@@ -1038,8 +1037,9 @@ export default function Home() {
         throw new Error("Canvas उपलब्ध नहीं है।");
       }
 
-      const canvasWidth = 1600;
-      const canvasHeight = 1131;
+      // A4 Portrait ratio: 210 : 297
+      const canvasWidth = 1131;
+      const canvasHeight = 1600;
       canvas.width = canvasWidth;
       canvas.height = canvasHeight;
 
@@ -1058,7 +1058,6 @@ export default function Home() {
         const textValue = String(value || "");
         if (!textValue) return;
 
-        // Hindi/English mixed text को character chunks में wrap करें।
         const chars = Array.from(textValue);
         const lines: string[] = [];
         let current = "";
@@ -1115,13 +1114,13 @@ export default function Home() {
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-        ctx.textBaseline = "alphabetic";
-
         // Header
+        ctx.textBaseline = "alphabetic";
         ctx.textAlign = "center";
+
         ctx.fillStyle = "#1e40af";
         ctx.font =
-          'bold 42px "Nirmala UI", "Mangal", Arial, sans-serif';
+          'bold 38px "Nirmala UI", "Mangal", Arial, sans-serif';
         ctx.fillText(
           "दैनिक कार्यक्रम प्रबंधन",
           canvasWidth / 2,
@@ -1130,39 +1129,46 @@ export default function Home() {
 
         ctx.fillStyle = "#475569";
         ctx.font =
-          '20px "Nirmala UI", "Mangal", Arial, sans-serif';
+          '18px "Nirmala UI", "Mangal", Arial, sans-serif';
         ctx.fillText(
           `दैनिक कार्यक्रम रिपोर्ट — ${formatDate(selectedDate)}`,
           canvasWidth / 2,
-          88
+          86
         );
 
         ctx.fillStyle = "#111827";
         ctx.font =
-          'bold 20px "Nirmala UI", "Mangal", Arial, sans-serif';
+          'bold 18px "Nirmala UI", "Mangal", Arial, sans-serif';
         ctx.fillText(
           `कुल कार्यक्रम: ${selectedDatePrograms.length}`,
           canvasWidth / 2,
-          120
+          116
         );
 
         // Table
-        const tableX = 28;
-        const tableY = 150;
-        const headerH = 52;
-        const rowH = 95;
+        const tableX = 30;
+        const tableY = 145;
+        const headerH = 58;
+        const rowH = 145;
+
         const scaleX = canvasWidth / pageWidth;
         const canvasColWidths = columns.map(
           (column) => column.width * scaleX
         );
 
+        const totalTableWidth = canvasColWidths.reduce(
+          (a, b) => a + b,
+          0
+        );
+
         let x = tableX;
 
+        // Header
         ctx.fillStyle = "#dbeafe";
         ctx.fillRect(
           tableX,
           tableY,
-          canvasColWidths.reduce((a, b) => a + b, 0),
+          totalTableWidth,
           headerH
         );
 
@@ -1171,27 +1177,27 @@ export default function Home() {
         ctx.strokeRect(
           tableX,
           tableY,
-          canvasColWidths.reduce((a, b) => a + b, 0),
+          totalTableWidth,
           headerH
         );
-
-        // Header cells
-        ctx.fillStyle = "#111827";
-        ctx.font =
-          'bold 18px "Nirmala UI", "Mangal", Arial, sans-serif';
 
         columns.forEach((column, index) => {
           const w = canvasColWidths[index];
 
-          ctx.strokeRect(x, tableY, w, headerH);
+          ctx.strokeRect(
+            x,
+            tableY,
+            w,
+            headerH
+          );
 
           drawWrappedCanvas(
             column.label,
-            x + 6,
+            x + 5,
             tableY + headerH / 2,
-            w - 12,
-            20,
-            'bold 17px "Nirmala UI", "Mangal", Arial, sans-serif'
+            w - 10,
+            18,
+            'bold 16px "Nirmala UI", "Mangal", Arial, sans-serif'
           );
 
           x += w;
@@ -1207,7 +1213,7 @@ export default function Home() {
           ctx.fillRect(
             tableX,
             rowY,
-            canvasColWidths.reduce((a, b) => a + b, 0),
+            totalTableWidth,
             rowH
           );
 
@@ -1218,29 +1224,39 @@ export default function Home() {
 
             ctx.strokeStyle = "#94a3b8";
             ctx.lineWidth = 1;
-            ctx.strokeRect(x, rowY, w, rowH);
+            ctx.strokeRect(
+              x,
+              rowY,
+              w,
+              rowH
+            );
 
-            let value = getValue(program, column.key);
+            let value = getValue(
+              program,
+              column.key
+            );
 
             if (column.key === "sr") {
               value = String(
-                (pageNumber - 1) * recordsPerPage + rowIndex + 1
+                (pageNumber - 1) * recordsPerPage +
+                  rowIndex +
+                  1
               );
             }
 
             const font =
               column.key === "title"
-                ? 'bold 17px "Nirmala UI", "Mangal", Arial, sans-serif'
-                : '16px "Nirmala UI", "Mangal", Arial, sans-serif';
+                ? 'bold 16px "Nirmala UI", "Mangal", Arial, sans-serif'
+                : '15px "Nirmala UI", "Mangal", Arial, sans-serif';
 
             ctx.fillStyle = "#111827";
 
             drawWrappedCanvas(
               value,
-              x + 6,
+              x + 5,
               rowY + rowH / 2,
-              w - 12,
-              21,
+              w - 10,
+              20,
               font
             );
 
@@ -1252,12 +1268,12 @@ export default function Home() {
         ctx.textAlign = "center";
         ctx.fillStyle = "#64748b";
         ctx.font =
-          '16px "Nirmala UI", "Mangal", Arial, sans-serif';
+          '14px "Nirmala UI", "Mangal", Arial, sans-serif';
 
         ctx.fillText(
           `दैनिक कार्यक्रम प्रबंधन प्रणाली  |  पृष्ठ ${pageNumber} / ${totalPages}`,
           canvasWidth / 2,
-          canvasHeight - 25
+          canvasHeight - 28
         );
       };
 
@@ -1266,28 +1282,37 @@ export default function Home() {
           pdf.addPage();
         }
 
-        const pagePrograms = selectedDatePrograms.slice(
-          page * recordsPerPage,
-          (page + 1) * recordsPerPage
+        const pagePrograms =
+          selectedDatePrograms.slice(
+            page * recordsPerPage,
+            (page + 1) * recordsPerPage
+          );
+
+        drawPage(
+          pagePrograms,
+          page + 1
         );
 
-        drawPage(pagePrograms, page + 1);
+        const imageData =
+          canvas.toDataURL("image/jpeg", 0.96);
 
-        const imageData = canvas.toDataURL("image/jpeg", 0.96);
-
+        // A4 Portrait: 210 x 297 mm
         pdf.addImage(
           imageData,
           "JPEG",
           0,
           0,
-          297,
           210,
+          297,
           undefined,
           "FAST"
         );
       }
 
-      const fileDate = selectedDate.split("-").reverse().join("-");
+      const fileDate = selectedDate
+        .split("-")
+        .reverse()
+        .join("-");
 
       pdf.save(
         `Daily-Program-Full-Report-${fileDate}.pdf`
