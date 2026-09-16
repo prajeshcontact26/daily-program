@@ -1481,39 +1481,12 @@ export default function Home() {
       ctx.fillText(isMarriage ? "हार्दिक शुभकामनाएँ" : "शोक संदेश", canvasWidth / 2, titleY + 98);
 
       // =====================================================
-      // MARRIAGE: NAMES INLINE IN THE MESSAGE
-      // NO SEPARATE NAME BOX
+      // MARRIAGE: NO SEPARATE NAME LINE
+      // Names will appear only inside the main blessing text below.
       // =====================================================
       if (isMarriage) {
-        const groom = (program.groom_name || "वर का नाम").trim();
-        const bride = (program.bride_name || "वधु का नाम").trim();
-
-        ctx.fillStyle = "#92400e";
-        ctx.font = `bold 27px ${fontFamily}`;
-        ctx.textAlign = "center";
-        ctx.fillText("सदा मंगलमय रहे आपका वैवाहिक जीवन", canvasWidth / 2, 390);
-
-        // Name line immediately below title area, not in separate boxes
-        ctx.fillStyle = "#7f1d1d";
-        ctx.font = `bold 40px ${fontFamily}`;
-        drawWrapped(
-          `${groom} एवं ${bride}`,
-          canvasWidth / 2,
-          455,
-          canvasWidth - 260,
-          48,
-          `bold 40px ${fontFamily}`,
-          "center",
-          2
-        );
-
-        // Decorative divider
-        ctx.fillStyle = "#d97706";
-        ctx.fillRect(300, 510, canvasWidth - 600, 5);
-        ctx.fillStyle = "#f59e0b";
-        ctx.beginPath();
-        ctx.arc(canvasWidth / 2, 512, 13, 0, Math.PI * 2);
-        ctx.fill();
+        // Intentionally no separate वर/वधु name line here.
+        // The groom and bride names are rendered only inside the message.
       } else {
         // ===================================================
         // SHOK: DECEASED PERSON NAME
@@ -1556,10 +1529,10 @@ export default function Home() {
       // =====================================================
       // MAIN MESSAGE
       // =====================================================
-      const messageY = isMarriage ? 565 : 585;
+      const messageY = isMarriage ? 430 : 585;
       const messageX = 125;
       const messageW = canvasWidth - 250;
-      const messageH = isMarriage ? 565 : 620;
+      const messageH = isMarriage ? 650 : 620;
 
       ctx.fillStyle = isMarriage ? "rgba(180,83,9,0.16)" : "rgba(51,65,85,0.16)";
       ctx.fillRect(messageX + 12, messageY + 14, messageW, messageH);
@@ -1607,10 +1580,10 @@ export default function Home() {
       if (isMarriage) {
         ctx.fillStyle = "#b45309";
         ctx.font = `bold 38px ${fontFamily}`;
-        ctx.fillText("सात फेरे • सात जन्मों का साथ", canvasWidth / 2, messageY + 420);
+        ctx.fillText("सात फेरे • सात जन्मों का साथ", canvasWidth / 2, messageY + 500);
 
         ctx.font = `25px ${fontFamily}`;
-        ctx.fillText("सदा सुखी रहें • सदा प्रसन्न रहें", canvasWidth / 2, messageY + 475);
+        ctx.fillText("सदा सुखी रहें • सदा प्रसन्न रहें", canvasWidth / 2, messageY + 555);
       } else {
         ctx.fillStyle = "#334155";
         ctx.font = `bold 38px ${fontFamily}`;
