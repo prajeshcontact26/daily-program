@@ -1485,11 +1485,9 @@ export default function Home() {
       // Names will appear only inside the main blessing text below.
       // =====================================================
       if (isMarriage) {
-        // Intentionally no separate वर/वधु name line here.
-        // The groom and bride names are rendered only inside the message.
+        // कोई अलग वर/वधु नाम लाइन नहीं। नाम केवल मुख्य संदेश में आएंगे।
       } else {
-        // Shok message uses the same clean layout as the wedding card.
-        // The deceased person's name is shown only inside the main message.
+        // कोई अलग "स्वर्गीय [नाम]" लाइन नहीं। मृतक का नाम केवल मुख्य संदेश में आएगा।
       }
 
       // =====================================================
