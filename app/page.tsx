@@ -1978,33 +1978,9 @@ export default function Home() {
     type: "marriage" | "condolence"
   ) => {
     try {
-      if (type !== "marriage" || program.category !== "वैवाहिक") {
-        alert("यह PDF केवल वैवाहिक शुभकामना संदेश के लिए है।");
-        return;
-      }
-
       // ---------------------------------------------------------
-      // Multiple marriage entries:
-      // जिस दिन जितने वैवाहिक कार्यक्रम हैं, उतने pages एक PDF में।
-      // जिस row पर button दबाया गया है, उस date के सभी विवाह शामिल होंगे।
+      // Common PDF setup
       // ---------------------------------------------------------
-      const marriagePrograms = programs
-        .filter(
-          (p) =>
-            p.program_date === program.program_date &&
-            p.category === "वैवाहिक"
-        )
-        .sort((a, b) => {
-          const timeA = a.program_time || "";
-          const timeB = b.program_time || "";
-          return timeA.localeCompare(timeB);
-        });
-
-      if (marriagePrograms.length === 0) {
-        alert("इस तारीख के लिए कोई वैवाहिक कार्यक्रम नहीं मिला।");
-        return;
-      }
-
       const pdf = new jsPDF({
         unit: "mm",
         format: "a4",
@@ -2102,22 +2078,7 @@ export default function Home() {
         return lines.length;
       };
 
-      const datePart = program.program_date
-        ? program.program_date
-            .split("-")
-            .reverse()
-            .join("-")
-        : "date";
-
-      // ---------------------------------------------------------
-      // हर marriage के लिए एक पूरा A4 page
-      // ---------------------------------------------------------
-      marriagePrograms.forEach((marriageProgram, index) => {
-        if (index > 0) {
-          pdf.addPage();
-        }
-
-        // Background
+      const drawBackground = () => {
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, W, H);
 
@@ -2148,41 +2109,308 @@ export default function Home() {
           drawH
         );
 
-        // Header
+        // Shok PDF में background को थोड़ा sober रखें।
+        if (type === "condolence") {
+          ctx.fillStyle =
+            "rgba(255,255,255,0.18)";
+          ctx.fillRect(0, 0, W, H);
+        }
+      };
+
+      // =========================================================
+      // VAIVAHIK — उस तारीख की हर शादी = एक PDF page
+      // =========================================================
+      if (type === "marriage") {
+        const marriagePrograms = programs
+          .filter(
+            (p) =>
+              p.program_date === program.program_date &&
+              p.category === "वैवाहिक"
+          )
+          .sort((a, b) =>
+            (a.program_time || "").localeCompare(
+              b.program_time || ""
+            )
+          );
+
+        if (marriagePrograms.length === 0) {
+          alert(
+            "इस तारीख के लिए कोई वैवाहिक कार्यक्रम नहीं मिला।"
+          );
+          return;
+        }
+
+        const datePart = program.program_date
+          ? program.program_date
+              .split("-")
+              .reverse()
+              .join("-")
+          : "date";
+
+        marriagePrograms.forEach(
+          (marriageProgram, index) => {
+            if (index > 0) {
+              pdf.addPage();
+            }
+
+            drawBackground();
+
+            ctx.textAlign = "center";
+            ctx.textBaseline = "top";
+
+            ctx.shadowColor =
+              "rgba(255,255,255,0.95)";
+            ctx.shadowBlur = 8;
+
+            ctx.font =
+              `bold 58px ${fontFamily}`;
+            ctx.fillStyle = "#c51f1f";
+
+            ctx.fillText(
+              "शुभकामना सन्देश",
+              700,
+              72
+            );
+
+            ctx.shadowColor = "transparent";
+            ctx.shadowBlur = 0;
+
+            ctx.font =
+              `bold 16px ${fontFamily}`;
+            ctx.fillStyle = "#7c2d12";
+            ctx.textAlign = "right";
+
+            ctx.fillText(
+              `विवाह ${index + 1} / ${marriagePrograms.length}`,
+              1325,
+              92
+            );
+
+            const recipient =
+              (marriageProgram.sender_name || "").trim();
+
+            drawText(
+              "श्रद्धेय,",
+              105,
+              220,
+              850,
+              `bold 30px ${fontFamily}`,
+              "#111827",
+              38,
+              1,
+              "left"
+            );
+
+            if (recipient) {
+              drawText(
+                recipient,
+                105,
+                270,
+                850,
+                `bold 34px ${fontFamily}`,
+                "#c51f1f",
+                42,
+                2,
+                "left"
+              );
+            }
+
+            const groom =
+              (marriageProgram.groom_name || "").trim();
+
+            const bride =
+              (marriageProgram.bride_name || "").trim();
+
+            const couple =
+              groom && bride
+                ? `चि. ${groom} संग सौ.का. ${bride}`
+                : groom
+                ? `चि. ${groom}`
+                : bride
+                ? `सौ.का. ${bride}`
+                : "नवदंपत्ति";
+
+            const contentX = 105;
+            const contentW = 850;
+
+            drawText(
+              couple,
+              contentX,
+              390,
+              contentW,
+              `bold 34px ${fontFamily}`,
+              "#1748d1",
+              43,
+              2,
+              "left"
+            );
+
+            drawText(
+              "के परिणय बंधन के शुभ अवसर पर ईश्वर से यही प्रार्थना है कि नवदंपत्ति का वैवाहिक जीवन सदा सुखमय रहे। विवाह का यह पवित्र बंधन आपके कुल की वृद्धि एवं और सम्पन्नता का कारक बने।",
+              contentX,
+              475,
+              contentW,
+              `27px ${fontFamily}`,
+              "#111827",
+              40,
+              5,
+              "left"
+            );
+
+            drawText(
+              "नवदंपत्योः वैवाहिक जीवनं सुखमयं भवतु।",
+              contentX + contentW / 2,
+              690,
+              700,
+              `bold 34px ${fontFamily}`,
+              "#c51f1f",
+              42,
+              2,
+              "center"
+            );
+
+            drawText(
+              "शुभाकांक्षी",
+              1060,
+              650,
+              260,
+              `bold 27px ${fontFamily}`,
+              "#111827",
+              34,
+              1,
+              "center"
+            );
+
+            drawText(
+              "(मुकेश टटवाल)",
+              1060,
+              690,
+              300,
+              `bold 30px ${fontFamily}`,
+              "#c51f1f",
+              38,
+              1,
+              "center"
+            );
+
+            drawText(
+              "महापौर, उज्जैन",
+              1060,
+              735,
+              300,
+              `bold 27px ${fontFamily}`,
+              "#111827",
+              34,
+              1,
+              "center"
+            );
+
+            ctx.fillStyle =
+              "rgba(255,255,255,0.90)";
+            ctx.fillRect(
+              55,
+              820,
+              W - 110,
+              55
+            );
+
+            ctx.textAlign = "center";
+            ctx.font =
+              `16px ${fontFamily}`;
+            ctx.fillStyle = "#1f2937";
+
+            ctx.fillText(
+              "Website - nagarnigamujjain.org  |  Email - mayorujjain-mp@mp.gov.in  |  nn.ujjain@mp.gov.in",
+              W / 2,
+              840
+            );
+
+            ctx.fillStyle = "#16a34a";
+            ctx.fillRect(
+              55,
+              875,
+              W - 110,
+              50
+            );
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font =
+              `bold 19px ${fontFamily}`;
+
+            ctx.fillText(
+              "छत्रपति शिवाजी भवन, आगर रोड उज्जैन (म.प्र.)",
+              W / 2,
+              890
+            );
+
+            ctx.fillStyle = "#374151";
+            ctx.font =
+              `15px ${fontFamily}`;
+            ctx.textAlign = "right";
+
+            ctx.fillText(
+              datePart,
+              W - 60,
+              950
+            );
+
+            const imageData =
+              canvas.toDataURL("image/jpeg", 0.97);
+
+            pdf.addImage(
+              imageData,
+              "JPEG",
+              0,
+              0,
+              297,
+              210,
+              undefined,
+              "FAST"
+            );
+          }
+        );
+
+        pdf.save(
+          `Shubhkamna-Sandesh-${datePart}-${marriagePrograms.length}-Vivah.pdf`
+        );
+
+        return;
+      }
+
+      // =========================================================
+      // SHOK — एक entry = एक page
+      // =========================================================
+      if (type === "condolence") {
+        drawBackground();
+
+        const datePart = program.program_date
+          ? program.program_date
+              .split("-")
+              .reverse()
+              .join("-")
+          : "date";
+
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
+
         ctx.shadowColor =
           "rgba(255,255,255,0.95)";
         ctx.shadowBlur = 8;
 
         ctx.font =
-          `bold 58px ${fontFamily}`;
-        ctx.fillStyle = "#c51f1f";
+          `bold 56px ${fontFamily}`;
+        ctx.fillStyle = "#334155";
 
         ctx.fillText(
-          "शुभकामना सन्देश",
+          "शोक संवेदना सन्देश",
           700,
-          72
+          75
         );
 
         ctx.shadowColor = "transparent";
         ctx.shadowBlur = 0;
 
-        // Page indicator
-        ctx.font =
-          `bold 16px ${fontFamily}`;
-        ctx.fillStyle = "#7c2d12";
-        ctx.textAlign = "right";
-
-        ctx.fillText(
-          `विवाह ${index + 1} / ${marriagePrograms.length}`,
-          1325,
-          92
-        );
-
-        // Recipient
-        const recipient =
-          (marriageProgram.sender_name || "").trim();
+        ctx.textAlign = "left";
 
         drawText(
           "श्रद्धेय,",
@@ -2196,6 +2424,9 @@ export default function Home() {
           "left"
         );
 
+        const recipient =
+          (program.sender_name || "").trim();
+
         if (recipient) {
           drawText(
             recipient,
@@ -2203,49 +2434,33 @@ export default function Home() {
             270,
             850,
             `bold 34px ${fontFamily}`,
-            "#c51f1f",
+            "#475569",
             42,
             2,
             "left"
           );
         }
 
-        // Couple
-        const groom =
-          (marriageProgram.groom_name || "").trim();
-        const bride =
-          (marriageProgram.bride_name || "").trim();
-
-        const couple =
-          groom && bride
-            ? `चि. ${groom} संग सौ.का. ${bride}`
-            : groom
-            ? `चि. ${groom}`
-            : bride
-            ? `सौ.का. ${bride}`
-            : "नवदंपत्ति";
-
-        const contentX = 105;
-        const contentW = 850;
+        const deceased =
+          (program.deceased_name || "").trim();
 
         drawText(
-          couple,
-          contentX,
+          `स्वर्गीय ${deceased || "दिवंगत आत्मा"}`,
+          105,
           390,
-          contentW,
+          850,
           `bold 34px ${fontFamily}`,
-          "#1748d1",
+          "#334155",
           43,
           2,
           "left"
         );
 
-        // Main message
         drawText(
-          "के परिणय बंधन के शुभ अवसर पर ईश्वर से यही प्रार्थना है कि नवदंपत्ति का वैवाहिक जीवन सदा सुखमय रहे। विवाह का यह पवित्र बंधन आपके कुल की वृद्धि एवं और सम्पन्नता का कारक बने।",
-          contentX,
+          "के निधन का समाचार अत्यंत दुःखद एवं पीड़ादायक है। ईश्वर दिवंगत आत्मा को अपने श्रीचरणों में स्थान प्रदान करें तथा शोकाकुल परिजनों को इस अपार दुःख को सहन करने की शक्ति प्रदान करें।",
+          105,
           475,
-          contentW,
+          850,
           `27px ${fontFamily}`,
           "#111827",
           40,
@@ -2253,39 +2468,27 @@ export default function Home() {
           "left"
         );
 
-        // Sanskrit blessing
         drawText(
-          "नवदंपत्योः वैवाहिक जीवनं सुखमयं भवतु।",
-          contentX + contentW / 2,
+          "ॐ शांति। शांति। शांति।",
+          525,
           690,
-          700,
+          500,
           `bold 34px ${fontFamily}`,
-          "#c51f1f",
+          "#475569",
           42,
           2,
           "center"
         );
 
-        // Signature
-        drawText(
-          "शुभाकांक्षी",
-          1060,
-          650,
-          260,
-          `bold 27px ${fontFamily}`,
-          "#111827",
-          34,
-          1,
-          "center"
-        );
-
+        // शोक संदेश में "शुभाकांक्षी" नहीं होगा,
+        // लेकिन नाम और पद दिखाई देंगे।
         drawText(
           "(मुकेश टटवाल)",
           1060,
           690,
           300,
           `bold 30px ${fontFamily}`,
-          "#c51f1f",
+          "#475569",
           38,
           1,
           "center"
@@ -2303,7 +2506,6 @@ export default function Home() {
           "center"
         );
 
-        // Footer
         ctx.fillStyle =
           "rgba(255,255,255,0.90)";
         ctx.fillRect(
@@ -2324,7 +2526,7 @@ export default function Home() {
           840
         );
 
-        ctx.fillStyle = "#16a34a";
+        ctx.fillStyle = "#64748b";
         ctx.fillRect(
           55,
           875,
@@ -2342,7 +2544,6 @@ export default function Home() {
           890
         );
 
-        // Date
         ctx.fillStyle = "#374151";
         ctx.font =
           `15px ${fontFamily}`;
@@ -2354,7 +2555,6 @@ export default function Home() {
           950
         );
 
-        // Current page → PDF
         const imageData =
           canvas.toDataURL("image/jpeg", 0.97);
 
@@ -2368,15 +2568,21 @@ export default function Home() {
           undefined,
           "FAST"
         );
-      });
 
-      pdf.save(
-        `Shubhkamna-Sandesh-${datePart}-${marriagePrograms.length}-Vivah.pdf`
-      );
+        const safeName = (
+          deceased || "Shok"
+        )
+          .replace(/[\\/:*?"<>|]/g, "-")
+          .slice(0, 70);
+
+        pdf.save(
+          `Shok-Sandesh-${safeName}-${datePart}.pdf`
+        );
+      }
     } catch (error) {
       console.error(error);
       alert(
-        "शुभकामना PDF नहीं बन सकी। Background image और assets folder check करें।"
+        "संदेश PDF नहीं बन सकी। कृपया Console में error देखें।"
       );
     }
   };
