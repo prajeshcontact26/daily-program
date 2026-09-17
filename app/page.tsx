@@ -2965,15 +2965,24 @@ export default function Home() {
         <div className="flex flex-col lg:flex-row lg:items-center gap-4">
 
           {showSelection && (
-            <label className="flex items-center gap-2 shrink-0 cursor-pointer">
+            <label
+              className={`flex items-center gap-2 shrink-0 cursor-pointer rounded-xl px-2 py-2 border transition ${
+                selectedProgramIds.includes(program.id)
+                  ? "bg-blue-50 border-blue-300"
+                  : "bg-white border-slate-200 hover:bg-slate-50"
+              }`}
+              title="इस कार्यक्रम को PDF के लिए चुनें"
+            >
               <input
                 type="checkbox"
                 checked={selectedProgramIds.includes(program.id)}
                 onChange={() => toggleProgramSelection(program.id)}
-                className="w-5 h-5 accent-blue-700"
+                className="w-6 h-6 accent-blue-700 cursor-pointer"
               />
-              <span className="text-xs font-semibold text-slate-500 lg:hidden">
-                Select
+              <span className="text-xs md:text-sm font-bold text-blue-700">
+                {selectedProgramIds.includes(program.id)
+                  ? "चयनित"
+                  : "चुनें"}
               </span>
             </label>
           )}
@@ -4031,6 +4040,7 @@ export default function Home() {
                       {selectedDate === today
                         ? "समय के अनुसार सूची"
                         : formatDate(selectedDate)}
+                      {" • कार्यक्रम के बाएँ ☐ चुनें, फिर Selected PDF दबाएँ"}
                     </p>
 
                   </div>
@@ -4050,8 +4060,8 @@ export default function Home() {
                         : "☑️ Select All"}
                     </button>
 
-                    <span className="text-sm font-semibold text-blue-700 whitespace-nowrap">
-                      Selected:{" "}
+                    <span className="text-sm font-bold text-blue-700 whitespace-nowrap bg-blue-50 border border-blue-200 px-3 py-2 rounded-lg">
+                      चयनित:{" "}
                       {
                         selectedPrograms.filter((program) =>
                           selectedProgramIds.includes(program.id)
