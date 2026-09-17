@@ -120,6 +120,10 @@ export default function Home() {
   // DATE-WISE PDF REPORT
   const [pdfLoading, setPdfLoading] = useState(false);
 
+  // SELECTED PROGRAMS - Combined PDF
+  const [selectedProgramIds, setSelectedProgramIds] = useState<number[]>([]);
+  const [selectedProgramsPdfLoading, setSelectedProgramsPdfLoading] = useState(false);
+
   // =========================================================
   // TODAY
   // =========================================================
@@ -200,6 +204,11 @@ export default function Home() {
   useEffect(() => {
     loadPrograms();
   }, []);
+
+  useEffect(() => {
+    // Date बदलने पर पुराने selected programs हटाएँ।
+    setSelectedProgramIds([]);
+  }, [selectedDate]);
 
   // =========================================================
   // FORMAT FUNCTIONS
@@ -956,6 +965,349 @@ export default function Home() {
     }
 
     await loadPrograms();
+  };
+
+  // =========================================================
+  // SELECTED PROGRAMS - COMBINED PDF
+  // Selected programs एक ही PDF में, समयानुसार, एक के नीचे एक।
+  // जरूरत पड़ने पर content अगले page पर चला जाएगा।
+  // =========================================================
+
+  const toggleProgramSelection = (id: number) => {
+    setSelectedProgramIds((current) =>
+      current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id]
+    );
+  };
+
+  const toggleSelectAllForDate = () => {
+    const ids = selectedPrograms.map((program) => program.id);
+
+    if (ids.length === 0) return;
+
+    const allSelected = ids.every((id) =>
+      selectedProgramIds.includes(id)
+    );
+
+    setSelectedProgramIds((current) =>
+      allSelected
+        ? current.filter((id) => !ids.includes(id))
+        : Array.from(new Set([...current, ...ids]))
+    );
+  };
+
+  const downloadSelectedProgramsPdf = async () => {
+    const selected = programs
+      .filter((program) => selectedProgramIds.includes(program.id))
+      .sort((a, b) => {
+        if (a.program_date !== b.program_date) {
+          return a.program_date.localeCompare(b.program_date);
+        }
+        return a.program_time.localeCompare(b.program_time);
+      });
+
+    if (selected.length === 0) {
+      alert("कृपया कम से कम एक कार्यक्रम चुनें।");
+      return;
+    }
+
+    try {
+      setSelectedProgramsPdfLoading(true);
+
+      const pdf = new jsPDF({
+        unit: "mm",
+        format: "a4",
+        orientation: "portrait",
+      });
+
+      const pageWidth = 210;
+      const pageHeight = 297;
+      const margin = 14;
+      const contentWidth = pageWidth - margin * 2;
+
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+
+      if (!ctx) {
+        throw new Error("Canvas उपलब्ध नहीं है।");
+      }
+
+      const W = 1400;
+      const H = 1980;
+      canvas.width = W;
+      canvas.height = H;
+
+      const fontFamily = '"Nirmala UI", "Mangal", Arial, sans-serif';
+
+      const wrapText = (
+        value: string,
+        maxWidth: number,
+        font: string
+      ) => {
+        ctx.font = font;
+
+        const chars = Array.from(value || "");
+        const lines: string[] = [];
+        let current = "";
+
+        for (const char of chars) {
+          const test = current + char;
+
+          if (
+            ctx.measureText(test).width <= maxWidth ||
+            current.length === 0
+          ) {
+            current = test;
+          } else {
+            lines.push(current);
+            current = char;
+          }
+        }
+
+        if (current) lines.push(current);
+        return lines;
+      };
+
+      const drawPage = (pagePrograms: Program[], pageNumber: number) => {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, W, H);
+
+        // Header
+        ctx.fillStyle = "#1e3a8a";
+        ctx.fillRect(0, 0, W, 190);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.font = `bold 48px ${fontFamily}`;
+        ctx.fillText("दैनिक कार्यक्रम", W / 2, 38);
+
+        ctx.font = `24px ${fontFamily}`;
+        ctx.fillText(
+          formatDate(pagePrograms[0]?.program_date || selectedDate),
+          W / 2,
+          108
+        );
+
+        let y = 235;
+
+        pagePrograms.forEach((program, index) => {
+          const titleFont = `bold 31px ${fontFamily}`;
+          const bodyFont = `24px ${fontFamily}`;
+          const timeFont = `bold 27px ${fontFamily}`;
+
+          const titleLines = wrapText(
+            program.title || "कार्यक्रम",
+            1020,
+            titleFont
+          ).slice(0, 3);
+
+          const locationLines = wrapText(
+            `स्थान: ${program.location || "-"}`,
+            1020,
+            bodyFont
+          ).slice(0, 2);
+
+          const categoryLine = `श्रेणी: ${program.category || "अन्य"}`;
+
+          const cardHeight =
+            150 +
+            titleLines.length * 42 +
+            locationLines.length * 35;
+
+          // अगर अगला card नीचे चला जाए तो नया page बनेगा
+          if (y + cardHeight > H - 145) {
+            // Current page footer
+            ctx.fillStyle = "#e2e8f0";
+            ctx.fillRect(55, H - 95, W - 110, 2);
+
+            ctx.fillStyle = "#64748b";
+            ctx.textAlign = "right";
+            ctx.font = `18px ${fontFamily}`;
+            ctx.fillText(
+              `Page ${pageNumber}`,
+              W - 65,
+              H - 68
+            );
+
+            return false;
+          }
+
+          // Card
+          ctx.fillStyle = "#f8fafc";
+          ctx.fillRect(55, y, W - 110, cardHeight);
+
+          ctx.strokeStyle = "#cbd5e1";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(55, y, W - 110, cardHeight);
+
+          // Time box
+          ctx.fillStyle = "#dbeafe";
+          ctx.fillRect(75, y + 22, 190, 70);
+
+          ctx.fillStyle = "#1d4ed8";
+          ctx.textAlign = "center";
+          ctx.font = timeFont;
+          ctx.fillText(
+            formatTime(program.program_time),
+            170,
+            y + 43
+          );
+
+          // Program number
+          ctx.fillStyle = "#1e3a8a";
+          ctx.font = `bold 22px ${fontFamily}`;
+          ctx.fillText(
+            `${index + 1}`,
+            170,
+            y + 112
+          );
+
+          // Main text
+          const textX = 300;
+
+          ctx.fillStyle = "#0f172a";
+          ctx.textAlign = "left";
+          ctx.font = titleFont;
+
+          titleLines.forEach((line, lineIndex) => {
+            ctx.fillText(
+              line,
+              textX,
+              y + 25 + lineIndex * 42
+            );
+          });
+
+          let textY = y + 25 + titleLines.length * 42 + 8;
+
+          ctx.fillStyle = "#475569";
+          ctx.font = bodyFont;
+
+          locationLines.forEach((line, lineIndex) => {
+            ctx.fillText(
+              line,
+              textX,
+              textY + lineIndex * 35
+            );
+          });
+
+          textY += locationLines.length * 35 + 8;
+
+          ctx.fillStyle = "#64748b";
+          ctx.font = `20px ${fontFamily}`;
+          ctx.fillText(categoryLine, textX, textY);
+
+          if (program.sender_name) {
+            textY += 32;
+            ctx.fillText(
+              `आमंत्रणकर्ता: ${program.sender_name}`,
+              textX,
+              textY
+            );
+          }
+
+          y += cardHeight + 24;
+
+          // Divider
+          if (index !== pagePrograms.length - 1) {
+            ctx.fillStyle = "#e2e8f0";
+            ctx.fillRect(75, y - 12, W - 150, 2);
+          }
+        });
+
+        // Footer
+        ctx.fillStyle = "#e2e8f0";
+        ctx.fillRect(55, H - 95, W - 110, 2);
+
+        ctx.fillStyle = "#64748b";
+        ctx.textAlign = "left";
+        ctx.font = `18px ${fontFamily}`;
+        ctx.fillText(
+          "नगरीय प्रशासन एवं जनसेवा",
+          65,
+          H - 68
+        );
+
+        ctx.textAlign = "right";
+        ctx.fillText(
+          `Page ${pageNumber}`,
+          W - 65,
+          H - 68
+        );
+
+        return true;
+      };
+
+      // Build pages dynamically. Normal case: selected 3/5 => one page.
+      // ज्यादा content होने पर स्वतः multiple pages।
+      let remaining = [...selected];
+      let pageNumber = 1;
+
+      while (remaining.length > 0) {
+        // पहले अनुमानित page पर items डालें।
+        // drawPage false होने पर एक item को अगले page में भेजें।
+        let pageItems: Program[] = [];
+        let pageDone = false;
+
+        while (!pageDone && remaining.length > 0) {
+          const candidate = [...pageItems, remaining[0]];
+
+          // Canvas साफ करके candidate की fit जांचने के बजाय
+          // सामान्यतः 6 तक compact items एक page पर रखें।
+          // फिर लंबे content के लिए page break logic।
+          if (candidate.length <= 6) {
+            pageItems = candidate;
+            remaining.shift();
+
+            if (remaining.length === 0) {
+              pageDone = true;
+            } else if (pageItems.length === 6) {
+              pageDone = true;
+            }
+          } else {
+            pageDone = true;
+          }
+        }
+
+        drawPage(pageItems, pageNumber);
+
+        const imageData = canvas.toDataURL("image/jpeg", 0.96);
+
+        if (pageNumber > 1) {
+          pdf.addPage();
+        }
+
+        pdf.addImage(
+          imageData,
+          "JPEG",
+          0,
+          0,
+          pageWidth,
+          pageHeight,
+          undefined,
+          "FAST"
+        );
+
+        pageNumber++;
+      }
+
+      const datePart =
+        selected[0]?.program_date ||
+        selectedDate ||
+        new Date().toISOString().slice(0, 10);
+
+      pdf.save(
+        `Selected-Programs-${datePart}-${selected.length}.pdf`
+      );
+    } catch (error) {
+      console.error(error);
+      alert(
+        "Selected Programs PDF नहीं बन सकी। कृपया Console में error देखें।"
+      );
+    } finally {
+      setSelectedProgramsPdfLoading(false);
+    }
   };
 
   // =========================================================
@@ -2480,8 +2832,18 @@ export default function Home() {
           "center"
         );
 
-        // शोक संदेश में "शुभाकांक्षी" नहीं होगा,
-        // लेकिन नाम और पद दिखाई देंगे।
+        drawText(
+          "शुभाकांक्षी",
+          1060,
+          650,
+          260,
+          `bold 27px ${fontFamily}`,
+          "#334155",
+          34,
+          1,
+          "center"
+        );
+
         drawText(
           "(मुकेश टटवाल)",
           1060,
@@ -2591,10 +2953,30 @@ export default function Home() {
   // PROGRAM CARD
   // =========================================================
 
-  const ProgramCard = ({ program }: { program: Program }) => {
+  const ProgramCard = ({
+    program,
+    showSelection = false,
+  }: {
+    program: Program;
+    showSelection?: boolean;
+  }) => {
     return (
       <div className="p-4 md:p-5 border-b last:border-b-0 hover:bg-slate-50 transition">
         <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+
+          {showSelection && (
+            <label className="flex items-center gap-2 shrink-0 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selectedProgramIds.includes(program.id)}
+                onChange={() => toggleProgramSelection(program.id)}
+                className="w-5 h-5 accent-blue-700"
+              />
+              <span className="text-xs font-semibold text-slate-500 lg:hidden">
+                Select
+              </span>
+            </label>
+          )}
 
           <div className="w-10 h-10 md:w-11 md:h-11 shrink-0 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
             {programs.findIndex((p) => p.id === program.id) + 1}
@@ -3653,14 +4035,53 @@ export default function Home() {
 
                   </div>
 
-                  <button
-                    onClick={downloadDatePdf}
-                    disabled={pdfLoading}
-                    className="border border-blue-300 text-blue-700 px-3 md:px-4 py-2 rounded-lg hover:bg-blue-50 disabled:opacity-60 font-semibold"
-                    title="इस तारीख की PDF डाउनलोड करें"
-                  >
-                    {pdfLoading ? "⏳" : "📄 PDF"}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={toggleSelectAllForDate}
+                      disabled={selectedPrograms.length === 0}
+                      className="border border-slate-300 text-slate-700 px-3 py-2 rounded-lg hover:bg-slate-50 disabled:opacity-50 font-semibold text-sm"
+                      title="इस तारीख के सभी कार्यक्रम Select/Unselect करें"
+                    >
+                      {selectedPrograms.length > 0 &&
+                      selectedPrograms.every((program) =>
+                        selectedProgramIds.includes(program.id)
+                      )
+                        ? "☐ Unselect All"
+                        : "☑️ Select All"}
+                    </button>
+
+                    <span className="text-sm font-semibold text-blue-700 whitespace-nowrap">
+                      Selected:{" "}
+                      {
+                        selectedPrograms.filter((program) =>
+                          selectedProgramIds.includes(program.id)
+                        ).length
+                      }
+                    </span>
+
+                    <button
+                      onClick={downloadSelectedProgramsPdf}
+                      disabled={
+                        selectedProgramsPdfLoading ||
+                        selectedProgramIds.length === 0
+                      }
+                      className="border border-emerald-300 text-emerald-700 px-3 md:px-4 py-2 rounded-lg hover:bg-emerald-50 disabled:opacity-60 font-semibold"
+                      title="Selected programs को एक ही PDF में डाउनलोड करें"
+                    >
+                      {selectedProgramsPdfLoading
+                        ? "⏳"
+                        : "📄 Selected PDF"}
+                    </button>
+
+                    <button
+                      onClick={downloadDatePdf}
+                      disabled={pdfLoading}
+                      className="border border-blue-300 text-blue-700 px-3 md:px-4 py-2 rounded-lg hover:bg-blue-50 disabled:opacity-60 font-semibold"
+                      title="इस तारीख की PDF डाउनलोड करें"
+                    >
+                      {pdfLoading ? "⏳" : "📄 PDF"}
+                    </button>
+                  </div>
 
                 </div>
 
@@ -3699,6 +4120,7 @@ export default function Home() {
                     <ProgramCard
                       key={program.id}
                       program={program}
+                      showSelection
                     />
                   ))
 
