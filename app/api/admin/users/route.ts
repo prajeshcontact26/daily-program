@@ -1,19 +1,42 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-export const dynamic = "force-dynamic";
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-function getServerClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SECRET_KEY;
+type Permissions = {
+  add_program: boolean;
+  edit_program: boolean;
+  delete_program: boolean;
+};
 
-  if (!supabaseUrl || !serviceRoleKey) {
+const ALL_PERMISSIONS: Permissions = {
+  add_program: true,
+  edit_program: true,
+  delete_program: true,
+};
+
+const DEFAULT_USER_PERMISSIONS: Permissions = {
+  add_program: true,
+  edit_program: false,
+  delete_program: false,
+};
+
+function json(data: unknown, status = 200) {
+  return NextResponse.json(data, {
+    status,
+    headers: {
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+function getAdminClient() {
+  if (!supabaseUrl || !serviceKey) {
     return null;
   }
 
-  return createClient(supabaseUrl, serviceRoleKey, {
+  return createClient(supabaseUrl, serviceKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
@@ -21,344 +44,444 @@ function getServerClient() {
   });
 }
 
-async function requireAdmin(request: NextRequest) {
-  const supabase = getServerClient();
+function getBearerToken(request: NextRequest) {
+  const header = request.headers.get("authorization") || "";
 
-  if (!supabase) {
+  if (!header.toLowerCase().startsWith("bearer ")) {
+    return "";
+  }
+
+  return header.slice(7).trim();
+}
+
+async function requireAdmin(request: NextRequest) {
+  const supabaseAdmin = getAdminClient();
+
+  if (!supabaseAdmin) {
     return {
-      error: NextResponse.json(
+      error: json(
         {
           error:
-            "Server Supabase configuration incomplete. Vercel Environment Variables में SUPABASE_SERVICE_ROLE_KEY (sb_secret_...) और NEXT_PUBLIC_SUPABASE_URL check करें।",
+            "Server Supabase configuration incomplete. Vercel Environment Variables में SUPABASE_SERVICE_ROLE_KEY और NEXT_PUBLIC_SUPABASE_URL check करें।",
         },
-        { status: 500 }
+        500
       ),
+      supabaseAdmin: null,
+      adminProfile: null,
     };
   }
 
-  const authorization = request.headers.get("authorization") || "";
-  const token = authorization.startsWith("Bearer ")
-    ? authorization.substring(7).trim()
-    : "";
+  const token = getBearerToken(request);
 
   if (!token) {
     return {
-      error: NextResponse.json(
-        { error: "Login session नहीं मिला।" },
-        { status: 401 }
-      ),
+      error: json({ error: "Authentication required." }, 401),
+      supabaseAdmin: null,
+      adminProfile: null,
     };
   }
 
-  const { data: userData, error: userError } =
-    await supabase.auth.getUser(token);
+  const {
+    data: { user },
+    error: userError,
+  } = await supabaseAdmin.auth.getUser(token);
 
-  if (userError || !userData.user) {
-    console.info("Admin API auth verification failed:", userError?.message);
-
+  if (userError || !user) {
     return {
-      error: NextResponse.json(
-        { error: "Login session invalid या expire हो गया है।" },
-        { status: 401 }
-      ),
+      error: json({ error: "Session expired. Please login again." }, 401),
+      supabaseAdmin: null,
+      adminProfile: null,
     };
   }
 
-  const userId = userData.user.id;
-  const userEmail = (userData.user.email || "").trim().toLowerCase();
-
-  // First try the authenticated user's UUID.
-  let { data: profile, error: profileError } = await supabase
+  const { data: profile, error: profileError } = await supabaseAdmin
     .from("user_profiles")
-    .select("id, email, full_name, role, enabled")
-    .eq("id", userId)
+    .select("id, email, full_name, role, enabled, permissions")
+    .eq("id", user.id)
     .maybeSingle();
 
-  // If UUID lookup does not find it, use the verified Auth email.
-  // This also makes the API tolerant of an older/migrated profile row.
-  if (!profile && userEmail) {
-    const fallback = await supabase
-      .from("user_profiles")
-      .select("id, email, full_name, role, enabled")
-      .ilike("email", userEmail)
-      .maybeSingle();
-
-    profile = fallback.data;
-    profileError = fallback.error;
-  }
-
   if (profileError) {
-    console.info("Admin profile lookup failed:", profileError.message);
-
+    console.error("Admin profile lookup error:", profileError);
     return {
-      error: NextResponse.json(
-        { error: "Admin profile verify नहीं हो सकी।" },
-        { status: 500 }
-      ),
+      error: json({ error: "Admin profile verify नहीं हो सका।" }, 500),
+      supabaseAdmin: null,
+      adminProfile: null,
     };
   }
 
-  if (
-    !profile ||
-    profile.role !== "admin" ||
-    profile.enabled !== true
-  ) {
-    console.info("Admin access denied:", {
-      userId,
-      email: userEmail,
-      profile,
-    });
-
+  if (!profile) {
     return {
-      error: NextResponse.json(
-        { error: "Admin access required." },
-        { status: 403 }
+      error: json(
+        {
+          error:
+            "इस account का user profile नहीं मिला। पहले user_profiles में profile बनाएं।",
+        },
+        403
       ),
+      supabaseAdmin: null,
+      adminProfile: null,
     };
   }
 
-  return { supabase, user: userData.user, profile };
+  if (profile.role !== "admin" || profile.enabled !== true) {
+    return {
+      error: json({ error: "Admin access required." }, 403),
+      supabaseAdmin: null,
+      adminProfile: null,
+    };
+  }
+
+  return {
+    error: null,
+    supabaseAdmin,
+    adminProfile: profile,
+  };
+}
+
+function normalizePermissions(value: unknown): Permissions {
+  const source =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+
+  return {
+    add_program: source.add_program === true,
+    edit_program: source.edit_program === true,
+    delete_program: source.delete_program === true,
+  };
 }
 
 export async function GET(request: NextRequest) {
   const auth = await requireAdmin(request);
 
-  if ("error" in auth) return auth.error;
+  if (auth.error) return auth.error;
 
-  const { data, error } = await auth.supabase
+  const supabaseAdmin = auth.supabaseAdmin!;
+
+  const { data: profiles, error: profileError } = await supabaseAdmin
     .from("user_profiles")
     .select(
-      "id, email, full_name, role, enabled, created_at, updated_at"
+      "id, email, full_name, role, enabled, created_at, updated_at, permissions"
     )
     .order("created_at", { ascending: true });
 
-  if (error) {
-    return NextResponse.json(
-      { error: error.message },
-      { status: 500 }
-    );
+  if (profileError) {
+    console.error("Users list error:", profileError);
+    return json({ error: profileError.message || "Users load नहीं हुए।" }, 500);
   }
 
-  return NextResponse.json({ users: data || [] });
+  const users = (profiles || []).map((profile) => ({
+    ...profile,
+    permissions:
+      profile.role === "admin"
+        ? ALL_PERMISSIONS
+        : normalizePermissions(profile.permissions || DEFAULT_USER_PERMISSIONS),
+  }));
+
+  return json({ users });
 }
 
 export async function POST(request: NextRequest) {
   const auth = await requireAdmin(request);
 
-  if ("error" in auth) return auth.error;
+  if (auth.error) return auth.error;
+
+  const supabaseAdmin = auth.supabaseAdmin!;
+
+  let body: {
+    email?: string;
+    full_name?: string;
+    password?: string;
+    role?: "admin" | "user";
+    permissions?: unknown;
+  };
 
   try {
-    const body = await request.json();
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid JSON body." }, 400);
+  }
 
-    const email = String(body.email || "").trim().toLowerCase();
-    const password = String(body.password || "");
-    const fullName = String(body.full_name || "").trim();
-    const role = body.role === "admin" ? "admin" : "user";
+  const email = String(body.email || "").trim().toLowerCase();
+  const fullName = String(body.full_name || "").trim();
+  const password = String(body.password || "");
+  const role = body.role === "admin" ? "admin" : "user";
 
-    if (!email || !password) {
-      return NextResponse.json(
-        { error: "Email और Password जरूरी हैं।" },
-        { status: 400 }
+  if (!email || !password) {
+    return json({ error: "Email और Password जरूरी हैं।" }, 400);
+  }
+
+  if (password.length < 6) {
+    return json({ error: "Password कम से कम 6 characters का होना चाहिए।" }, 400);
+  }
+
+  const permissions =
+    role === "admin"
+      ? ALL_PERMISSIONS
+      : normalizePermissions(body.permissions || DEFAULT_USER_PERMISSIONS);
+
+  const { data: created, error: createError } =
+    await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        full_name: fullName,
+      },
+    });
+
+  if (createError || !created.user) {
+    console.error("Create auth user error:", createError);
+
+    const message = createError?.message || "User create नहीं हुआ।";
+
+    if (message.toLowerCase().includes("already")) {
+      return json(
+        { error: "यह Email पहले से registered है।" },
+        409
       );
     }
 
-    if (password.length < 6) {
-      return NextResponse.json(
-        { error: "Password कम से कम 6 characters का होना चाहिए।" },
-        { status: 400 }
-      );
-    }
+    return json({ error: message }, 400);
+  }
 
-    const { data: created, error: createError } =
-      await auth.supabase.auth.admin.createUser({
+  const authUser = created.user;
+
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from("user_profiles")
+    .upsert(
+      {
+        id: authUser.id,
         email,
-        password,
-        email_confirm: true,
-        user_metadata: {
-          full_name: fullName,
-        },
-      });
+        full_name: fullName || null,
+        role,
+        enabled: true,
+        permissions,
+      },
+      { onConflict: "id" }
+    )
+    .select(
+      "id, email, full_name, role, enabled, created_at, updated_at, permissions"
+    )
+    .single();
 
-    if (createError || !created.user) {
-      return NextResponse.json(
-        {
-          error:
-            createError?.message || "User create नहीं हुआ।",
-        },
-        { status: 400 }
-      );
-    }
+  if (profileError) {
+    console.error("Create profile error:", profileError);
 
-    const { data: profile, error: profileError } =
-      await auth.supabase
-        .from("user_profiles")
-        .insert({
-          id: created.user.id,
-          email,
-          full_name: fullName || null,
-          role,
-          enabled: true,
-        })
-        .select(
-          "id, email, full_name, role, enabled, created_at"
-        )
-        .single();
+    // Roll back auth user if profile creation fails.
+    await supabaseAdmin.auth.admin.deleteUser(authUser.id);
 
-    if (profileError) {
-      await auth.supabase.auth.admin.deleteUser(created.user.id);
-
-      return NextResponse.json(
-        { error: profileError.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ user: profile }, { status: 201 });
-  } catch (error) {
-    console.info("Create user error:", error);
-
-    return NextResponse.json(
-      { error: "Invalid request" },
-      { status: 400 }
+    return json(
+      {
+        error:
+          "Auth User बन गया लेकिन user profile save नहीं हुई। Operation rollback कर दिया गया।",
+      },
+      500
     );
   }
+
+  return json(
+    {
+      message: "User created successfully.",
+      user: {
+        ...profile,
+        permissions:
+          role === "admin" ? ALL_PERMISSIONS : normalizePermissions(permissions),
+      },
+    },
+    201
+  );
 }
 
 export async function PATCH(request: NextRequest) {
   const auth = await requireAdmin(request);
 
-  if ("error" in auth) return auth.error;
+  if (auth.error) return auth.error;
+
+  const supabaseAdmin = auth.supabaseAdmin!;
+
+  let body: {
+    id?: string;
+    action?: string;
+    permissions?: unknown;
+  };
 
   try {
-    const body = await request.json();
-    const userId = String(body.id || "");
-    const action = String(body.action || "");
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid JSON body." }, 400);
+  }
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: "User ID जरूरी है।" },
-        { status: 400 }
-      );
-    }
+  const id = String(body.id || "").trim();
+  const action = String(body.action || "").trim().toLowerCase();
 
-    if (
-      userId === auth.user.id &&
-      (action === "disable" || action === "delete")
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "आप अपने current admin account को disable/delete नहीं कर सकते।",
-        },
-        { status: 400 }
-      );
-    }
+  if (!id) {
+    return json({ error: "User id जरूरी है।" }, 400);
+  }
 
-    if (action === "disable" || action === "enable") {
-      const enabled = action === "enable";
+  if (!action) {
+    return json({ error: "Action जरूरी है।" }, 400);
+  }
 
-      const { error: profileError } = await auth.supabase
-        .from("user_profiles")
-        .update({
-          enabled,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", userId);
-
-      if (profileError) {
-        return NextResponse.json(
-          { error: profileError.message },
-          { status: 500 }
-        );
-      }
-
-      const { error: authError } =
-        await auth.supabase.auth.admin.updateUserById(userId, {
-          ban_duration: enabled ? "none" : "876000h",
-        });
-
-      if (authError) {
-        return NextResponse.json(
-          { error: authError.message },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({ success: true });
-    }
-
-    if (action === "delete") {
-      const { error: profileError } = await auth.supabase
-        .from("user_profiles")
-        .delete()
-        .eq("id", userId);
-
-      if (profileError) {
-        return NextResponse.json(
-          { error: profileError.message },
-          { status: 500 }
-        );
-      }
-
-      const { error: authError } =
-        await auth.supabase.auth.admin.deleteUser(userId);
-
-      if (authError) {
-        return NextResponse.json(
-          { error: authError.message },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({ success: true });
-    }
-
-    if (action === "reset") {
-      const { data: target, error: targetError } =
-        await auth.supabase
-          .from("user_profiles")
-          .select("email")
-          .eq("id", userId)
-          .maybeSingle();
-
-      if (targetError || !target?.email) {
-        return NextResponse.json(
-          { error: "User का Email नहीं मिला।" },
-          { status: 404 }
-        );
-      }
-
-      const redirectTo =
-        `${new URL(request.url).origin}/reset-password`;
-
-      // Supabase Auth sends the recovery email. The service-role
-      // client is server-only and is never exposed to the browser.
-      const { error: resetError } =
-        await auth.supabase.auth.resetPasswordForEmail(
-          target.email,
-          { redirectTo }
-        );
-
-      if (resetError) {
-        return NextResponse.json(
-          { error: resetError.message },
-          { status: 400 }
-        );
-      }
-
-      return NextResponse.json({ success: true });
-    }
-
-    return NextResponse.json(
-      { error: "Unknown action" },
-      { status: 400 }
-    );
-  } catch (error) {
-    console.info("Admin user action error:", error);
-
-    return NextResponse.json(
-      { error: "Invalid request" },
-      { status: 400 }
+  if (id === auth.adminProfile?.id && ["disable", "delete"].includes(action)) {
+    return json(
+      { error: "आप अपने current Admin account को disable/delete नहीं कर सकते।" },
+      400
     );
   }
+
+  const { data: target, error: targetError } = await supabaseAdmin
+    .from("user_profiles")
+    .select("id, email, full_name, role, enabled, permissions")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (targetError) {
+    console.error("Target profile error:", targetError);
+    return json({ error: "Target User verify नहीं हो सका।" }, 500);
+  }
+
+  if (!target) {
+    return json({ error: "User नहीं मिला।" }, 404);
+  }
+
+  // IMPORTANT: this is the action that fixes the current "Unknown action" error.
+  if (action === "permissions") {
+    if (target.role === "admin") {
+      return json(
+        { error: "Admin User की permissions हमेशा पूरी रहती हैं।" },
+        400
+      );
+    }
+
+    const permissions = normalizePermissions(body.permissions);
+
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from("user_profiles")
+      .update({
+        permissions,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select(
+        "id, email, full_name, role, enabled, created_at, updated_at, permissions"
+      )
+      .single();
+
+    if (updateError) {
+      console.error("Permissions update error:", updateError);
+      return json(
+        { error: updateError.message || "Permissions save नहीं हुईं।" },
+        500
+      );
+    }
+
+    return json({
+      message: "Permissions updated successfully.",
+      user: updated,
+    });
+  }
+
+  if (action === "enable" || action === "disable") {
+    const enabled = action === "enable";
+
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from("user_profiles")
+      .update({
+        enabled,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select(
+        "id, email, full_name, role, enabled, created_at, updated_at, permissions"
+      )
+      .single();
+
+    if (updateError) {
+      console.error("Enable/disable error:", updateError);
+      return json(
+        { error: updateError.message || "User status update नहीं हुआ।" },
+        500
+      );
+    }
+
+    return json({
+      message: enabled ? "User enabled." : "User disabled.",
+      user: updated,
+    });
+  }
+
+  if (action === "reset") {
+    if (!target.email) {
+      return json(
+        { error: "इस User के लिए email उपलब्ध नहीं है।" },
+        400
+      );
+    }
+
+    const redirectTo = process.env.NEXT_PUBLIC_SITE_URL
+      ? `${process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "")}/reset-password`
+      : undefined;
+
+    const { error: resetError } =
+      await supabaseAdmin.auth.resetPasswordForEmail(target.email, {
+        redirectTo,
+      });
+
+    if (resetError) {
+      console.error("Reset password error:", resetError);
+      return json(
+        {
+          error:
+            resetError.message || "Password reset request भेजी नहीं जा सकी।",
+        },
+        500
+      );
+    }
+
+    return json({
+      message: "Password reset request sent.",
+    });
+  }
+
+  if (action === "delete") {
+    const { error: deleteAuthError } =
+      await supabaseAdmin.auth.admin.deleteUser(id);
+
+    if (deleteAuthError) {
+      console.error("Delete auth user error:", deleteAuthError);
+      return json(
+        {
+          error:
+            deleteAuthError.message || "Auth User delete नहीं हुआ।",
+        },
+        500
+      );
+    }
+
+    const { error: deleteProfileError } = await supabaseAdmin
+      .from("user_profiles")
+      .delete()
+      .eq("id", id);
+
+    if (deleteProfileError) {
+      console.error("Delete profile error:", deleteProfileError);
+      return json({
+        message:
+          "Auth User delete हो गया, लेकिन profile cleanup manually verify करें।",
+        warning: deleteProfileError.message,
+      });
+    }
+
+    return json({
+      message: "User deleted successfully.",
+    });
+  }
+
+  return json(
+    {
+      error: `Unknown action: ${action}`,
+    },
+    400
+  );
 }

@@ -18,7 +18,21 @@ type UserProfile = {
   enabled: boolean;
   created_at: string;
   updated_at?: string;
-  permissions: UserPermissions;
+  permissions?: UserPermissions | null;
+};
+
+type UserAction = "enable" | "disable" | "delete" | "reset";
+
+const defaultUserPermissions: UserPermissions = {
+  add_program: true,
+  edit_program: false,
+  delete_program: false,
+};
+
+const adminPermissions: UserPermissions = {
+  add_program: true,
+  edit_program: true,
+  delete_program: true,
 };
 
 export default function AdminUsersPage() {
@@ -37,11 +51,8 @@ export default function AdminUsersPage() {
   const [role, setRole] = useState<"admin" | "user">("user");
 
   const [permissionUser, setPermissionUser] = useState<UserProfile | null>(null);
-  const [permissionDraft, setPermissionDraft] = useState<UserPermissions>({
-    add_program: true,
-    edit_program: false,
-    delete_program: false,
-  });
+  const [permissionDraft, setPermissionDraft] =
+    useState<UserPermissions>(defaultUserPermissions);
 
   const stats = useMemo(
     () => ({
@@ -52,21 +63,33 @@ export default function AdminUsersPage() {
     [users]
   );
 
-  const loadUsers = async () => {
-    setLoading(true);
+  const clearStatus = () => {
     setError("");
     setMessage("");
+  };
+
+  const getSession = async () => {
+    const { data, error: sessionError } = await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw new Error("Session प्राप्त नहीं हो सकी।");
+    }
+
+    if (!data.session) {
+      router.replace("/login");
+      return null;
+    }
+
+    return data.session;
+  };
+
+  const loadUsers = async () => {
+    setLoading(true);
+    clearStatus();
 
     try {
-      const { data: sessionData } =
-        await supabase.auth.getSession();
-
-      const session = sessionData.session;
-
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
+      const session = await getSession();
+      if (!session) return;
 
       const response = await fetch("/api/admin/users", {
         method: "GET",
@@ -76,7 +99,7 @@ export default function AdminUsersPage() {
         cache: "no-store",
       });
 
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
 
       if (response.status === 401) {
         await supabase.auth.signOut();
@@ -85,7 +108,9 @@ export default function AdminUsersPage() {
       }
 
       if (response.status === 403) {
-        setError("इस account को Admin access नहीं है। Dashboard पर वापस भेजा जा रहा है।");
+        setError(
+          "इस account को Admin access नहीं है। Dashboard पर वापस भेजा जा रहा है।"
+        );
         setTimeout(() => router.replace("/"), 900);
         return;
       }
@@ -95,38 +120,36 @@ export default function AdminUsersPage() {
         return;
       }
 
-      setUsers(result.users || []);
+      setUsers(Array.isArray(result.users) ? result.users : []);
     } catch (err) {
-      console.info("Load users error:", err);
-      setError("Users load करते समय समस्या हुई।");
+      console.error("Load users error:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Users load करते समय समस्या हुई।"
+      );
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadUsers();
+    void loadUsers();
   }, []);
 
-  const createUser = async (event: React.FormEvent) => {
+  const createUser = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-
     if (working) return;
 
     setWorking(true);
-    setError("");
-    setMessage("");
+    clearStatus();
 
     try {
-      const { data: sessionData } =
-        await supabase.auth.getSession();
+      const session = await getSession();
+      if (!session) return;
 
-      const session = sessionData.session;
-
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
+      const permissions =
+        role === "admin" ? adminPermissions : defaultUserPermissions;
 
       const response = await fetch("/api/admin/users", {
         method: "POST",
@@ -135,26 +158,21 @@ export default function AdminUsersPage() {
           Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          email,
-          full_name: fullName,
+          email: email.trim(),
+          full_name: fullName.trim(),
           password,
           role,
-          permissions:
-            role === "admin"
-              ? {
-                  add_program: true,
-                  edit_program: true,
-                  delete_program: true,
-                }
-              : {
-                  add_program: true,
-                  edit_program: false,
-                  delete_program: false,
-                },
+          permissions,
         }),
       });
 
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
+
+      if (response.status === 401) {
+        await supabase.auth.signOut();
+        router.replace("/login");
+        return;
+      }
 
       if (!response.ok) {
         setError(result.error || "User create नहीं हुआ।");
@@ -170,21 +188,17 @@ export default function AdminUsersPage() {
 
       await loadUsers();
     } catch (err) {
-      console.info("Create user error:", err);
+      console.error("Create user error:", err);
       setError("User create करते समय समस्या हुई।");
     } finally {
       setWorking(false);
     }
   };
 
-  const userAction = async (
-    id: string,
-    action: "enable" | "disable" | "delete" | "reset"
-  ) => {
+  const userAction = async (id: string, action: UserAction) => {
     if (working) return;
 
     const target = users.find((u) => u.id === id);
-
     if (!target) return;
 
     if (action === "delete") {
@@ -195,19 +209,11 @@ export default function AdminUsersPage() {
     }
 
     setWorking(true);
-    setError("");
-    setMessage("");
+    clearStatus();
 
     try {
-      const { data: sessionData } =
-        await supabase.auth.getSession();
-
-      const session = sessionData.session;
-
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
+      const session = await getSession();
+      if (!session) return;
 
       const response = await fetch("/api/admin/users", {
         method: "PATCH",
@@ -218,24 +224,30 @@ export default function AdminUsersPage() {
         body: JSON.stringify({ id, action }),
       });
 
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
+
+      if (response.status === 401) {
+        await supabase.auth.signOut();
+        router.replace("/login");
+        return;
+      }
 
       if (!response.ok) {
         setError(result.error || "Action complete नहीं हुआ।");
         return;
       }
 
-      const messages = {
+      const messages: Record<UserAction, string> = {
         enable: "User enable कर दिया गया।",
         disable: "User disable कर दिया गया।",
         delete: "User delete कर दिया गया।",
-        reset: "Password reset email भेज दिया गया।",
+        reset: "Password reset request सफलतापूर्वक भेजी गई।",
       };
 
       setMessage(messages[action]);
       await loadUsers();
     } catch (err) {
-      console.info("User action error:", err);
+      console.error("User action error:", err);
       setError("Action complete करते समय समस्या हुई।");
     } finally {
       setWorking(false);
@@ -243,34 +255,28 @@ export default function AdminUsersPage() {
   };
 
   const openPermissions = (user: UserProfile) => {
+    if (user.role === "admin") return;
+
     setPermissionUser(user);
     setPermissionDraft({
-      add_program:
-        user.role === "admin" ? true : user.permissions?.add_program === true,
-      edit_program:
-        user.role === "admin" ? true : user.permissions?.edit_program === true,
-      delete_program:
-        user.role === "admin" ? true : user.permissions?.delete_program === true,
+      add_program: user.permissions?.add_program === true,
+      edit_program: user.permissions?.edit_program === true,
+      delete_program: user.permissions?.delete_program === true,
     });
-    setError("");
-    setMessage("");
+    clearStatus();
   };
 
   const savePermissions = async () => {
-    if (!permissionUser || permissionUser.role === "admin") return;
+    if (!permissionUser || permissionUser.role === "admin" || working) {
+      return;
+    }
 
     setWorking(true);
-    setError("");
-    setMessage("");
+    clearStatus();
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const session = sessionData.session;
-
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
+      const session = await getSession();
+      if (!session) return;
 
       const response = await fetch("/api/admin/users", {
         method: "PATCH",
@@ -281,22 +287,32 @@ export default function AdminUsersPage() {
         body: JSON.stringify({
           id: permissionUser.id,
           action: "permissions",
-          permissions: permissionDraft,
+          permissions: {
+            add_program: permissionDraft.add_program === true,
+            edit_program: permissionDraft.edit_program === true,
+            delete_program: permissionDraft.delete_program === true,
+          },
         }),
       });
 
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
+
+      if (response.status === 401) {
+        await supabase.auth.signOut();
+        router.replace("/login");
+        return;
+      }
 
       if (!response.ok) {
         setError(result.error || "Permissions save नहीं हुईं।");
         return;
       }
 
-      setMessage("User permissions सफलतापूर्वक save हो गईं।");
       setPermissionUser(null);
+      setMessage("User permissions सफलतापूर्वक save हो गईं।");
       await loadUsers();
     } catch (err) {
-      console.info("Save permissions error:", err);
+      console.error("Save permissions error:", err);
       setError("Permissions save करते समय समस्या हुई।");
     } finally {
       setWorking(false);
@@ -305,16 +321,14 @@ export default function AdminUsersPage() {
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-800">
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white shadow-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white shadow-sm">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-700 text-sm font-extrabold text-white">
               DP
             </div>
             <div>
-              <h1 className="text-lg font-extrabold">
-                User Management
-              </h1>
+              <h1 className="text-lg font-extrabold">User Management</h1>
               <p className="text-[11px] text-slate-500">
                 दैनिक कार्यक्रम प्रबंधन — Admin Panel
               </p>
@@ -345,9 +359,7 @@ export default function AdminUsersPage() {
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div className="rounded-xl border border-slate-300 bg-white p-5 shadow-sm">
-            <p className="text-xs font-semibold text-slate-500">
-              कुल Users
-            </p>
+            <p className="text-xs font-semibold text-slate-500">कुल Users</p>
             <p className="mt-2 text-3xl font-extrabold text-blue-700">
               {stats.total}
             </p>
@@ -363,9 +375,7 @@ export default function AdminUsersPage() {
           </div>
 
           <div className="rounded-xl border border-slate-300 bg-white p-5 shadow-sm">
-            <p className="text-xs font-semibold text-slate-500">
-              Admins
-            </p>
+            <p className="text-xs font-semibold text-slate-500">Admins</p>
             <p className="mt-2 text-3xl font-extrabold text-purple-600">
               {stats.admins}
             </p>
@@ -384,10 +394,10 @@ export default function AdminUsersPage() {
             <button
               onClick={() => {
                 setShowCreate(true);
-                setError("");
-                setMessage("");
+                clearStatus();
               }}
-              className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800"
+              disabled={working}
+              className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800 disabled:opacity-60"
             >
               + नया User
             </button>
@@ -409,102 +419,137 @@ export default function AdminUsersPage() {
                     <th className="px-4 py-3">User</th>
                     <th className="px-4 py-3">Role</th>
                     <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Permissions</th>
                     <th className="px-4 py-3">Actions</th>
                   </tr>
                 </thead>
+
                 <tbody>
-                  {users.map((user) => (
-                    <tr
-                      key={user.id}
-                      className="border-t border-slate-100"
-                    >
-                      <td className="px-4 py-4">
-                        <div className="font-bold text-slate-800">
-                          {user.full_name || "—"}
-                        </div>
-                        <div className="text-xs text-slate-500">
-                          {user.email || "—"}
-                        </div>
-                      </td>
+                  {users.map((user) => {
+                    const permissions =
+                      user.role === "admin"
+                        ? adminPermissions
+                        : user.permissions || defaultUserPermissions;
 
-                      <td className="px-4 py-4">
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
-                            user.role === "admin"
-                              ? "bg-purple-100 text-purple-700"
-                              : "bg-blue-100 text-blue-700"
-                          }`}
-                        >
-                          {user.role === "admin"
-                            ? "Admin"
-                            : "User"}
-                        </span>
-                      </td>
+                    return (
+                      <tr key={user.id} className="border-t border-slate-100">
+                        <td className="px-4 py-4">
+                          <div className="font-bold text-slate-800">
+                            {user.full_name || "—"}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {user.email || "—"}
+                          </div>
+                        </td>
 
-                      <td className="px-4 py-4">
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
-                            user.enabled
-                              ? "bg-green-100 text-green-700"
-                              : "bg-red-100 text-red-700"
-                          }`}
-                        >
-                          {user.enabled ? "Active" : "Disabled"}
-                        </span>
-                      </td>
-
-                      <td className="px-4 py-4">
-                        <div className="flex flex-wrap gap-2">
-                          {user.role === "user" && (
-                            <button
-                              onClick={() => openPermissions(user)}
-                              className="rounded-lg border border-violet-300 px-3 py-1.5 text-xs font-bold text-violet-700 hover:bg-violet-50"
-                            >
-                              Permissions
-                            </button>
-                          )}
-
-                          {user.enabled ? (
-                            <button
-                              onClick={() =>
-                                userAction(user.id, "disable")
-                              }
-                              className="rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-50"
-                            >
-                              Disable
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() =>
-                                userAction(user.id, "enable")
-                              }
-                              className="rounded-lg border border-green-300 px-3 py-1.5 text-xs font-bold text-green-700 hover:bg-green-50"
-                            >
-                              Enable
-                            </button>
-                          )}
-
-                          <button
-                            onClick={() =>
-                              userAction(user.id, "reset")
-                            }
-                            className="rounded-lg border border-blue-300 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-50"
+                        <td className="px-4 py-4">
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                              user.role === "admin"
+                                ? "bg-purple-100 text-purple-700"
+                                : "bg-blue-100 text-blue-700"
+                            }`}
                           >
-                            Reset Password
-                          </button>
+                            {user.role === "admin" ? "Admin" : "User"}
+                          </span>
+                        </td>
 
-                          <button
-                            onClick={() =>
-                              userAction(user.id, "delete")
-                            }
-                            className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50"
+                        <td className="px-4 py-4">
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                              user.enabled
+                                ? "bg-green-100 text-green-700"
+                                : "bg-red-100 text-red-700"
+                            }`}
                           >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            {user.enabled ? "Active" : "Disabled"}
+                          </span>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <div className="flex flex-wrap gap-1.5 text-[10px] font-bold">
+                            <span
+                              className={`rounded-full px-2 py-1 ${
+                                permissions.add_program
+                                  ? "bg-green-100 text-green-700"
+                                  : "bg-slate-100 text-slate-500"
+                              }`}
+                            >
+                              Add {permissions.add_program ? "✓" : "—"}
+                            </span>
+                            <span
+                              className={`rounded-full px-2 py-1 ${
+                                permissions.edit_program
+                                  ? "bg-green-100 text-green-700"
+                                  : "bg-slate-100 text-slate-500"
+                              }`}
+                            >
+                              Edit {permissions.edit_program ? "✓" : "—"}
+                            </span>
+                            <span
+                              className={`rounded-full px-2 py-1 ${
+                                permissions.delete_program
+                                  ? "bg-green-100 text-green-700"
+                                  : "bg-slate-100 text-slate-500"
+                              }`}
+                            >
+                              Delete {permissions.delete_program ? "✓" : "—"}
+                            </span>
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <div className="flex flex-wrap gap-2">
+                            {user.role === "user" && (
+                              <button
+                                onClick={() => openPermissions(user)}
+                                disabled={working}
+                                className="rounded-lg border border-violet-300 px-3 py-1.5 text-xs font-bold text-violet-700 hover:bg-violet-50 disabled:opacity-60"
+                              >
+                                Permissions
+                              </button>
+                            )}
+
+                            {user.enabled ? (
+                              <button
+                                onClick={() =>
+                                  userAction(user.id, "disable")
+                                }
+                                disabled={working}
+                                className="rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-50 disabled:opacity-60"
+                              >
+                                Disable
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => userAction(user.id, "enable")}
+                                disabled={working}
+                                className="rounded-lg border border-green-300 px-3 py-1.5 text-xs font-bold text-green-700 hover:bg-green-50 disabled:opacity-60"
+                              >
+                                Enable
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => userAction(user.id, "reset")}
+                              disabled={working}
+                              className="rounded-lg border border-blue-300 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-60"
+                            >
+                              Reset Password
+                            </button>
+
+                            <button
+                              onClick={() => userAction(user.id, "delete")}
+                              disabled={working}
+                              className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-60"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -520,7 +565,8 @@ export default function AdminUsersPage() {
                 User Permissions
               </h2>
               <p className="mt-1 text-xs text-slate-500">
-                {permissionUser.full_name || "User"} • {permissionUser.email || ""}
+                {permissionUser.full_name || "User"} •{" "}
+                {permissionUser.email || ""}
               </p>
             </div>
 
@@ -535,6 +581,7 @@ export default function AdminUsersPage() {
                 ["delete_program", "🗑️ कार्यक्रम Delete करना"],
               ].map(([key, label]) => {
                 const permissionKey = key as keyof UserPermissions;
+
                 return (
                   <label
                     key={key}
@@ -543,13 +590,14 @@ export default function AdminUsersPage() {
                     <span className="text-sm font-semibold text-slate-700">
                       {label}
                     </span>
+
                     <input
                       type="checkbox"
                       checked={permissionDraft[permissionKey]}
-                      onChange={(e) =>
+                      onChange={(event) =>
                         setPermissionDraft((current) => ({
                           ...current,
-                          [permissionKey]: e.target.checked,
+                          [permissionKey]: event.target.checked,
                         }))
                       }
                       className="h-5 w-5 cursor-pointer accent-blue-700"
@@ -567,10 +615,12 @@ export default function AdminUsersPage() {
               <button
                 type="button"
                 onClick={() => setPermissionUser(null)}
+                disabled={working}
                 className="rounded-lg border px-4 py-2 text-sm font-bold"
               >
                 Cancel
               </button>
+
               <button
                 type="button"
                 onClick={savePermissions}
@@ -596,9 +646,7 @@ export default function AdminUsersPage() {
 
             <form onSubmit={createUser} className="space-y-4 p-5">
               <div>
-                <label className="mb-1 block text-xs font-bold">
-                  Name
-                </label>
+                <label className="mb-1 block text-xs font-bold">Name</label>
                 <input
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
@@ -608,9 +656,7 @@ export default function AdminUsersPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-bold">
-                  Email
-                </label>
+                <label className="mb-1 block text-xs font-bold">Email</label>
                 <input
                   type="email"
                   required
@@ -637,17 +683,11 @@ export default function AdminUsersPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-bold">
-                  Role
-                </label>
+                <label className="mb-1 block text-xs font-bold">Role</label>
                 <select
                   value={role}
                   onChange={(e) =>
-                    setRole(
-                      e.target.value === "admin"
-                        ? "admin"
-                        : "user"
-                    )
+                    setRole(e.target.value === "admin" ? "admin" : "user")
                   }
                   className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-600"
                 >
@@ -655,6 +695,17 @@ export default function AdminUsersPage() {
                   <option value="admin">Admin</option>
                 </select>
               </div>
+
+              {role === "user" ? (
+                <div className="rounded-xl bg-blue-50 p-3 text-xs text-blue-700">
+                  Default: Add अनुमति ON, Edit/Delete OFF. बाद में Permissions
+                  से बदली जा सकती हैं।
+                </div>
+              ) : (
+                <div className="rounded-xl bg-purple-50 p-3 text-xs text-purple-700">
+                  Admin को Add, Edit और Delete सभी permissions मिलेंगी।
+                </div>
+              )}
 
               <div className="flex gap-2 pt-2">
                 <button
