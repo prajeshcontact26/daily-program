@@ -115,11 +115,11 @@ export default function ProgramSharePage() {
   };
 
   if (loading) {
-    return <main className="min-h-screen bg-slate-100 flex items-center justify-center p-6"><div className="bg-white rounded-2xl shadow p-6 text-slate-600">कार्यक्रम लोड हो रहा है...</div></main>;
+    return <main className="min-h-screen bg-slate-100 flex items-center justify-center p-6"><div className="bg-white rounded-2xl shadow p-6 text-slate-900">कार्यक्रम लोड हो रहा है...</div></main>;
   }
 
   if (error || !program) {
-    return <main className="min-h-screen bg-slate-100 flex items-center justify-center p-6"><div className="bg-white rounded-2xl shadow p-8 text-center max-w-md"><div className="text-5xl mb-4">⚠️</div><h1 className="text-xl font-bold text-slate-800">कार्यक्रम नहीं मिला</h1><p className="text-slate-500 mt-2">{error}</p></div></main>;
+    return <main className="min-h-screen bg-slate-100 flex items-center justify-center p-6"><div className="bg-white rounded-2xl shadow p-8 text-center max-w-md"><div className="text-5xl mb-4">⚠️</div><h1 className="text-xl font-bold text-slate-950">कार्यक्रम नहीं मिला</h1><p className="text-slate-700 mt-2">{error}</p></div></main>;
   }
 
   return (
@@ -127,7 +127,7 @@ export default function ProgramSharePage() {
       <div className="max-w-2xl mx-auto">
         <div className="bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden">
           <div className="bg-gradient-to-r from-blue-800 to-blue-600 text-white p-6 md:p-8">
-            <p className="text-sm opacity-90">कार्यक्रम विवरण</p>
+            <p className="text-sm font-semibold text-white/95">कार्यक्रम विवरण</p>
             <h1 className="text-2xl md:text-3xl font-bold mt-2">{program.title}</h1>
             <span className="inline-block mt-3 bg-white/15 px-3 py-1 rounded-full text-sm">{program.category}</span>
           </div>
@@ -135,15 +135,15 @@ export default function ProgramSharePage() {
           <div className="p-6 md:p-8 space-y-4">
             {program.photo_url && <img src={program.photo_url} alt="कार्यक्रम फोटो" className="w-full max-h-80 object-cover rounded-2xl border border-slate-200" />}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs text-slate-500">दिनांक</p><p className="font-bold mt-1">📅 {formatDate(program.program_date)}</p></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs text-slate-500">समय</p><p className="font-bold mt-1">⏰ {formatTime(program.program_time)}</p></div>
+              <div className="rounded-2xl bg-slate-100 border border-slate-200 p-4"><p className="text-xs font-semibold text-slate-700">दिनांक</p><p className="font-bold text-slate-950 mt-1">📅 {formatDate(program.program_date)}</p></div>
+              <div className="rounded-2xl bg-slate-100 border border-slate-200 p-4"><p className="text-xs font-semibold text-slate-700">समय</p><p className="font-bold text-slate-950 mt-1">⏰ {formatTime(program.program_time)}</p></div>
             </div>
-            <div className="rounded-2xl border border-slate-200 p-4"><p className="text-xs text-slate-500">स्थान</p><p className="font-semibold mt-1">📍 {program.location}</p></div>
-            {program.sender_name && <div className="rounded-2xl border border-slate-200 p-4"><p className="text-xs text-slate-500">प्रेषक</p><p className="font-semibold mt-1">👤 {program.sender_name}</p></div>}
+            <div className="rounded-2xl border border-slate-200 p-4"><p className="text-xs font-semibold text-slate-700">स्थान</p><p className="font-semibold text-slate-950 mt-1">📍 {program.location}</p></div>
+            {program.sender_name && <div className="rounded-2xl border border-slate-200 p-4"><p className="text-xs font-semibold text-slate-700">प्रेषक</p><p className="font-semibold text-slate-950 mt-1">👤 {program.sender_name}</p></div>}
 
             {program.mobile_number && (
               <div className="rounded-2xl border border-green-200 bg-green-50 p-4">
-                <p className="text-xs text-green-700">मोबाइल नंबर</p>
+                <p className="text-xs font-bold text-green-800">मोबाइल नंबर</p>
                 <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
                   <a
                     href={`tel:${program.mobile_number.replace(/[^0-9+]/g, "")}`}
@@ -168,17 +168,17 @@ export default function ProgramSharePage() {
                     📋 Copy
                   </button>
                 </div>
-                <p className="mt-2 text-[11px] text-green-700">
+                <p className="mt-2 text-[11px] font-medium text-green-800">
                   नंबर पर टैप करके सीधे कॉल करें या Copy दबाकर नंबर कॉपी करें।
                 </p>
               </div>
             )}
-            {program.category === "वैवाहिक" && (program.groom_name || program.bride_name) && <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><p className="text-xs text-amber-700">वैवाहिक विवरण</p><p className="font-semibold mt-1">चि. {program.groom_name || ""} संग सौ.का. {program.bride_name || ""}</p></div>}
-            {program.category === "शोक" && program.deceased_name && <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs text-slate-500">दिवंगत</p><p className="font-semibold mt-1">{program.deceased_name}</p></div>}
-            {program.description && <div className="rounded-2xl border border-slate-200 p-4"><p className="text-xs text-slate-500">विवरण</p><p className="font-semibold mt-1 whitespace-pre-wrap">{program.description}</p></div>}
+            {program.category === "वैवाहिक" && (program.groom_name || program.bride_name) && <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><p className="text-xs font-bold text-amber-800">वैवाहिक विवरण</p><p className="font-semibold text-slate-950 mt-1">चि. {program.groom_name || ""} संग सौ.का. {program.bride_name || ""}</p></div>}
+            {program.category === "शोक" && program.deceased_name && <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-700">दिवंगत</p><p className="font-semibold text-slate-950 mt-1">{program.deceased_name}</p></div>}
+            {program.description && <div className="rounded-2xl border border-slate-200 p-4"><p className="text-xs font-semibold text-slate-700">विवरण</p><p className="font-semibold text-slate-950 mt-1 whitespace-pre-wrap">{program.description}</p></div>}
 
             <button onClick={downloadInfo} className="w-full px-5 py-3 rounded-xl bg-blue-700 text-white font-bold hover:bg-blue-800">⬇️ कार्यक्रम विवरण Download करें</button>
-            <p className="text-xs text-center text-slate-500">यह पेज QR Code से खोला गया है। कार्यक्रम की जानकारी बाद में भी यहाँ देखी और डाउनलोड की जा सकती है।</p>
+            <p className="text-xs text-center font-medium text-slate-700">यह पेज QR Code से खोला गया है। कार्यक्रम की जानकारी बाद में भी यहाँ देखी और डाउनलोड की जा सकती है।</p>
           </div>
         </div>
       </div>
