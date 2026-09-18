@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { supabase } from "../../lib/supabase";
 
 type Program = {
   id: number;
@@ -55,19 +54,31 @@ export default function ProgramSharePage() {
         return;
       }
 
-      const { data, error: queryError } = await supabase
-        .from("daily_programs")
-        .select("id, program_date, program_time, title, sender_name, mobile_number, location, category, photo_url, description, groom_name, bride_name, deceased_name")
-        .eq("id", id)
-        .single();
+      try {
+        const response = await fetch(`/api/program/${id}`, {
+          method: "GET",
+          cache: "no-store",
+        });
 
-      if (queryError || !data) {
-        console.error(queryError);
-        setError("यह कार्यक्रम उपलब्ध नहीं है या हटाया जा चुका है।");
-      } else {
-        setProgram(data as Program);
+        const result = await response.json();
+
+        if (!response.ok || !result.program) {
+          console.error(result);
+          setError(
+            result.error ||
+              "यह कार्यक्रम उपलब्ध नहीं है या हटाया जा चुका है।"
+          );
+        } else {
+          setProgram(result.program as Program);
+        }
+      } catch (fetchError) {
+        console.error(fetchError);
+        setError(
+          "कार्यक्रम की जानकारी लोड नहीं हो सकी। कृपया कुछ देर बाद फिर प्रयास करें।"
+        );
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     loadProgram();
