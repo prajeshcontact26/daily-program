@@ -3,36 +3,15 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
-type UserPermissions = {
-  add_program: boolean;
-  edit_program: boolean;
-  delete_program: boolean;
-};
-
-function normalizePermissions(
-  permissions: Partial<UserPermissions> | null | undefined,
-  role: "admin" | "user"
-): UserPermissions {
-  if (role === "admin") {
-    return {
-      add_program: true,
-      edit_program: true,
-      delete_program: true,
-    };
-  }
-
-  return {
-    add_program: permissions?.add_program === true,
-    edit_program: permissions?.edit_program === true,
-    delete_program: permissions?.delete_program === true,
-  };
-}
-
 function getServerClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SECRET_KEY;
 
-  if (!supabaseUrl || !serviceRoleKey) return null;
+  if (!supabaseUrl || !serviceRoleKey) {
+    return null;
+  }
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
@@ -50,7 +29,7 @@ async function requireAdmin(request: NextRequest) {
       error: NextResponse.json(
         {
           error:
-            "Server Supabase configuration incomplete. .env.local में SUPABASE_SERVICE_ROLE_KEY check करें।",
+            "Server Supabase configuration incomplete. Vercel Environment Variables में SUPABASE_SERVICE_ROLE_KEY (sb_secret_...) और NEXT_PUBLIC_SUPABASE_URL check करें।",
         },
         { status: 500 }
       ),
@@ -75,6 +54,8 @@ async function requireAdmin(request: NextRequest) {
     await supabase.auth.getUser(token);
 
   if (userError || !userData.user) {
+    console.info("Admin API auth verification failed:", userError?.message);
+
     return {
       error: NextResponse.json(
         { error: "Login session invalid या expire हो गया है।" },
@@ -86,16 +67,19 @@ async function requireAdmin(request: NextRequest) {
   const userId = userData.user.id;
   const userEmail = (userData.user.email || "").trim().toLowerCase();
 
+  // First try the authenticated user's UUID.
   let { data: profile, error: profileError } = await supabase
     .from("user_profiles")
-    .select("id, email, full_name, role, enabled, permissions")
+    .select("id, email, full_name, role, enabled")
     .eq("id", userId)
     .maybeSingle();
 
+  // If UUID lookup does not find it, use the verified Auth email.
+  // This also makes the API tolerant of an older/migrated profile row.
   if (!profile && userEmail) {
     const fallback = await supabase
       .from("user_profiles")
-      .select("id, email, full_name, role, enabled, permissions")
+      .select("id, email, full_name, role, enabled")
       .ilike("email", userEmail)
       .maybeSingle();
 
@@ -104,6 +88,8 @@ async function requireAdmin(request: NextRequest) {
   }
 
   if (profileError) {
+    console.info("Admin profile lookup failed:", profileError.message);
+
     return {
       error: NextResponse.json(
         { error: "Admin profile verify नहीं हो सकी।" },
@@ -117,6 +103,12 @@ async function requireAdmin(request: NextRequest) {
     profile.role !== "admin" ||
     profile.enabled !== true
   ) {
+    console.info("Admin access denied:", {
+      userId,
+      email: userEmail,
+      profile,
+    });
+
     return {
       error: NextResponse.json(
         { error: "Admin access required." },
@@ -130,12 +122,13 @@ async function requireAdmin(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const auth = await requireAdmin(request);
+
   if ("error" in auth) return auth.error;
 
   const { data, error } = await auth.supabase
     .from("user_profiles")
     .select(
-      "id, email, full_name, role, enabled, permissions, created_at, updated_at"
+      "id, email, full_name, role, enabled, created_at, updated_at"
     )
     .order("created_at", { ascending: true });
 
@@ -146,19 +139,12 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const users = (data || []).map((user) => ({
-    ...user,
-    permissions: normalizePermissions(
-      user.permissions as Partial<UserPermissions> | null,
-      user.role === "admin" ? "admin" : "user"
-    ),
-  }));
-
-  return NextResponse.json({ users });
+  return NextResponse.json({ users: data || [] });
 }
 
 export async function POST(request: NextRequest) {
   const auth = await requireAdmin(request);
+
   if ("error" in auth) return auth.error;
 
   try {
@@ -195,15 +181,13 @@ export async function POST(request: NextRequest) {
 
     if (createError || !created.user) {
       return NextResponse.json(
-        { error: createError?.message || "User create नहीं हुआ।" },
+        {
+          error:
+            createError?.message || "User create नहीं हुआ।",
+        },
         { status: 400 }
       );
     }
-
-    const permissions = normalizePermissions(
-      body.permissions as Partial<UserPermissions> | null,
-      role
-    );
 
     const { data: profile, error: profileError } =
       await auth.supabase
@@ -214,10 +198,9 @@ export async function POST(request: NextRequest) {
           full_name: fullName || null,
           role,
           enabled: true,
-          permissions,
         })
         .select(
-          "id, email, full_name, role, enabled, permissions, created_at"
+          "id, email, full_name, role, enabled, created_at"
         )
         .single();
 
@@ -230,18 +213,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json(
-      {
-        user: {
-          ...profile,
-          permissions: normalizePermissions(
-            profile.permissions as Partial<UserPermissions> | null,
-            role
-          ),
-        },
-      },
-      { status: 201 }
-    );
+    return NextResponse.json({ user: profile }, { status: 201 });
   } catch (error) {
     console.info("Create user error:", error);
 
@@ -254,6 +226,7 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   const auth = await requireAdmin(request);
+
   if ("error" in auth) return auth.error;
 
   try {
@@ -270,62 +243,15 @@ export async function PATCH(request: NextRequest) {
 
     if (
       userId === auth.user.id &&
-      (action === "disable" || action === "delete" || action === "permissions")
+      (action === "disable" || action === "delete")
     ) {
-      if (action !== "permissions") {
-        return NextResponse.json(
-          {
-            error:
-              "आप अपने current admin account को disable/delete नहीं कर सकते।",
-          },
-          { status: 400 }
-        );
-      }
-    }
-
-    if (action === "permissions") {
-      const { data: target, error: targetError } =
-        await auth.supabase
-          .from("user_profiles")
-          .select("role")
-          .eq("id", userId)
-          .maybeSingle();
-
-      if (targetError || !target) {
-        return NextResponse.json(
-          { error: "User नहीं मिला।" },
-          { status: 404 }
-        );
-      }
-
-      if (target.role === "admin") {
-        return NextResponse.json(
-          { error: "Admin User की permissions अलग से बदलने की जरूरत नहीं है।" },
-          { status: 400 }
-        );
-      }
-
-      const permissions = normalizePermissions(
-        body.permissions as Partial<UserPermissions> | null,
-        "user"
+      return NextResponse.json(
+        {
+          error:
+            "आप अपने current admin account को disable/delete नहीं कर सकते।",
+        },
+        { status: 400 }
       );
-
-      const { error: updateError } = await auth.supabase
-        .from("user_profiles")
-        .update({
-          permissions,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", userId);
-
-      if (updateError) {
-        return NextResponse.json(
-          { error: updateError.message },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({ success: true, permissions });
     }
 
     if (action === "disable" || action === "enable") {
@@ -405,6 +331,8 @@ export async function PATCH(request: NextRequest) {
       const redirectTo =
         `${new URL(request.url).origin}/reset-password`;
 
+      // Supabase Auth sends the recovery email. The service-role
+      // client is server-only and is never exposed to the browser.
       const { error: resetError } =
         await auth.supabase.auth.resetPasswordForEmail(
           target.email,

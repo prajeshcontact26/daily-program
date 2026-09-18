@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { type Session } from "@supabase/supabase-js";
 import { supabase } from "./lib/supabase";
 import { jsPDF } from "jspdf";
 import * as XLSX from "xlsx";
@@ -73,6 +74,17 @@ export default function Home() {
 
   const [authLoading, setAuthLoading] = useState(true);
   const [userEmail, setUserEmail] = useState("");
+  const [userRole, setUserRole] = useState<"admin" | "user">("user");
+  const [permissions, setPermissions] = useState({
+    add_program: false,
+    edit_program: false,
+    delete_program: false,
+  });
+
+  const isAdmin = userRole === "admin";
+  const canAddProgram = isAdmin || permissions.add_program;
+  const canEditProgram = isAdmin || permissions.edit_program;
+  const canDeleteProgram = isAdmin || permissions.delete_program;
 
   const [programs, setPrograms] = useState<Program[]>([]);
   const [selectedDate, setSelectedDate] = useState("");
@@ -222,6 +234,37 @@ export default function Home() {
   useEffect(() => {
     let mounted = true;
 
+    const applyProfile = async (session: Session) => {
+      setUserEmail(session.user.email || "");
+
+      const { data: profile, error: profileError } = await supabase
+        .from("user_profiles")
+        .select("role, enabled, permissions")
+        .eq("id", session.user.id)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error("Profile load error:", profileError);
+      }
+
+      if (!mounted) return;
+
+      if (profile?.enabled === false) {
+        await supabase.auth.signOut();
+        router.replace("/login");
+        return;
+      }
+
+      const role = profile?.role === "admin" ? "admin" : "user";
+      setUserRole(role);
+      setPermissions({
+        add_program: role === "admin" || profile?.permissions?.add_program === true,
+        edit_program: role === "admin" || profile?.permissions?.edit_program === true,
+        delete_program: role === "admin" || profile?.permissions?.delete_program === true,
+      });
+      setAuthLoading(false);
+    };
+
     const checkAuth = async () => {
       const {
         data: { session },
@@ -234,8 +277,7 @@ export default function Home() {
         return;
       }
 
-      setUserEmail(session.user.email || "");
-      setAuthLoading(false);
+      await applyProfile(session);
     };
 
     checkAuth();
@@ -248,8 +290,7 @@ export default function Home() {
         return;
       }
 
-      setUserEmail(session.user.email || "");
-      setAuthLoading(false);
+      void applyProfile(session);
     });
 
     return () => {
@@ -492,6 +533,11 @@ export default function Home() {
   // =========================================================
 
   const openAddForm = () => {
+    if (!canAddProgram) {
+      alert("इस User को नया कार्यक्रम जोड़ने की अनुमति नहीं है।");
+      return;
+    }
+
     setEditingId(null);
 
     setForm({
@@ -512,6 +558,11 @@ export default function Home() {
   // =========================================================
 
   const openEditForm = (program: Program) => {
+    if (!canEditProgram) {
+      alert("इस User को कार्यक्रम edit करने की अनुमति नहीं है।");
+      return;
+    }
+
     setEditingId(program.id);
 
     setForm({
@@ -699,6 +750,10 @@ export default function Home() {
   };
 
   const openExcelImport = () => {
+    if (!isAdmin) {
+      alert("Excel Import केवल Admin के लिए उपलब्ध है।");
+      return;
+    }
     setExcelFile(null);
     setExcelRows([]);
     setExcelPreview([]);
@@ -970,6 +1025,13 @@ export default function Home() {
   };
 
   const saveProgram = async () => {
+    if (editingId !== null ? !canEditProgram : !canAddProgram) {
+      alert(editingId !== null
+        ? "इस User को कार्यक्रम update करने की अनुमति नहीं है।"
+        : "इस User को नया कार्यक्रम जोड़ने की अनुमति नहीं है।");
+      return;
+    }
+
     if (!form.date || !form.time || !form.title || !form.location) {
       alert("कृपया तारीख, समय, कार्यक्रम और स्थान भरें।");
       return;
@@ -1100,6 +1162,11 @@ export default function Home() {
   // =========================================================
 
   const deleteProgram = async (id: number) => {
+    if (!canDeleteProgram) {
+      alert("इस User को कार्यक्रम delete करने की अनुमति नहीं है।");
+      return;
+    }
+
     const confirmDelete = window.confirm(
       "क्या आप यह कार्यक्रम हटाना चाहते हैं?"
     );
@@ -3305,19 +3372,23 @@ export default function Home() {
               </button>
             )}
 
-            <button
-              onClick={() => openEditForm(program)}
-              className="px-3 py-2 rounded-lg border border-blue-300 hover:bg-blue-50 text-blue-700"
-            >
-              ✏️
-            </button>
+            {canEditProgram && (
+              <button
+                onClick={() => openEditForm(program)}
+                className="px-3 py-2 rounded-lg border border-blue-300 hover:bg-blue-50 text-blue-700"
+              >
+                ✏️
+              </button>
+            )}
 
-            <button
-              onClick={() => deleteProgram(program.id)}
-              className="px-3 py-2 rounded-lg border border-red-300 hover:bg-red-50 text-red-600"
-            >
-              🗑️
-            </button>
+            {canDeleteProgram && (
+              <button
+                onClick={() => deleteProgram(program.id)}
+                className="px-3 py-2 rounded-lg border border-red-300 hover:bg-red-50 text-red-600"
+              >
+                🗑️
+              </button>
+            )}
 
           </div>
 
@@ -3707,12 +3778,14 @@ export default function Home() {
               अभी कोई आगामी कार्यक्रम नहीं है।
             </p>
 
-            <button
-              onClick={openAddForm}
-              className="mt-4 bg-blue-700 hover:bg-blue-800 text-white px-5 py-3 rounded-xl font-semibold"
-            >
-              ＋ आगामी कार्यक्रम जोड़ें
-            </button>
+            {canAddProgram && (
+              <button
+                onClick={openAddForm}
+                className="mt-4 bg-blue-700 hover:bg-blue-800 text-white px-5 py-3 rounded-xl font-semibold"
+              >
+                ＋ आगामी कार्यक्रम जोड़ें
+              </button>
+            )}
 
           </div>
 
@@ -3853,23 +3926,23 @@ export default function Home() {
 
                       <div className="flex gap-2 shrink-0">
 
-                        <button
-                          onClick={() =>
-                            openEditForm(program)
-                          }
-                          className="px-3 py-2 rounded-lg border border-blue-300 hover:bg-blue-50 text-blue-700"
-                        >
-                          ✏️
-                        </button>
+                        {canEditProgram && (
+                          <button
+                            onClick={() => openEditForm(program)}
+                            className="px-3 py-2 rounded-lg border border-blue-300 hover:bg-blue-50 text-blue-700"
+                          >
+                            ✏️
+                          </button>
+                        )}
 
-                        <button
-                          onClick={() =>
-                            deleteProgram(program.id)
-                          }
-                          className="px-3 py-2 rounded-lg border border-red-300 hover:bg-red-50 text-red-600"
-                        >
-                          🗑️
-                        </button>
+                        {canDeleteProgram && (
+                          <button
+                            onClick={() => deleteProgram(program.id)}
+                            className="px-3 py-2 rounded-lg border border-red-300 hover:bg-red-50 text-red-600"
+                          >
+                            🗑️
+                          </button>
+                        )}
 
                       </div>
 
@@ -3964,26 +4037,33 @@ export default function Home() {
 
           <div className="hidden md:flex items-center gap-3">
 
-            <button
-              onClick={openExcelImport}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-3 rounded-xl font-semibold shadow-sm transition"
-            >
-              📥 Excel Import
-            </button>
+            {isAdmin && (
+              <button
+                onClick={openExcelImport}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-3 rounded-xl font-semibold shadow-sm transition"
+              >
+                📥 Excel Import
+              </button>
+            )}
 
-            <button
-              onClick={openAddForm}
-              className="bg-blue-700 hover:bg-blue-800 text-white px-5 py-3 rounded-xl font-semibold shadow-sm transition"
-            >
-              ＋ नया कार्यक्रम
-            </button>
-            <button
-              onClick={() => router.push("/admin-users")}
-              className="bg-violet-600 hover:bg-violet-700 text-white px-5 py-3 rounded-xl font-semibold shadow-sm transition"
-              title="User Management"
-            >
-              👥 Users
-            </button>
+            {canAddProgram && (
+              <button
+                onClick={openAddForm}
+                className="bg-blue-700 hover:bg-blue-800 text-white px-5 py-3 rounded-xl font-semibold shadow-sm transition"
+              >
+                ＋ नया कार्यक्रम
+              </button>
+            )}
+
+            {isAdmin && (
+              <button
+                onClick={() => router.push("/admin-users")}
+                className="bg-violet-600 hover:bg-violet-700 text-white px-5 py-3 rounded-xl font-semibold shadow-sm transition"
+                title="User Management"
+              >
+                👥 Users
+              </button>
+            )}
 
 
 
@@ -4122,42 +4202,41 @@ export default function Home() {
 
               <div className="border-t my-5"></div>
 
+              {/* ADMIN USER MANAGEMENT */}
+
+              {isAdmin && (
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    router.push("/admin-users");
+                  }}
+                  className="w-full bg-violet-600 hover:bg-violet-700 text-white px-4 py-3.5 rounded-xl font-semibold shadow-sm transition mt-1"
+                >
+                  👥 User Management
+                </button>
+              )}
+
               {/* EXCEL IMPORT */}
-            <button
-              onClick={() => router.push("/admin-users")}
-              className="w-full text-left px-4 py-3 rounded-xl font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-100 transition"
-            >
-              👥 User Management
-            </button>
 
-
-
-              <button
-                onClick={openExcelImport}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3.5 rounded-xl font-semibold shadow-sm transition"
-              >
-                📥 Excel Import
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={openExcelImport}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3.5 rounded-xl font-semibold shadow-sm transition"
+                >
+                  📥 Excel Import
+                </button>
+              )}
 
               {/* ADD PROGRAM */}
 
-              <button
-                onClick={openAddForm}
-                className="w-full bg-blue-700 hover:bg-blue-800 text-white px-4 py-3.5 rounded-xl font-semibold shadow-sm transition"
-              >
-                ＋ नया कार्यक्रम
-              </button>
-              <button
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  router.push("/admin-users");
-                }}
-                className="w-full bg-violet-600 hover:bg-violet-700 text-white px-4 py-3.5 rounded-xl font-semibold shadow-sm transition mt-2"
-              >
-                👥 User Management
-              </button>
-
-
+              {canAddProgram && (
+                <button
+                  onClick={openAddForm}
+                  className="w-full bg-blue-700 hover:bg-blue-800 text-white px-4 py-3.5 rounded-xl font-semibold shadow-sm transition mt-2"
+                >
+                  ＋ नया कार्यक्रम
+                </button>
+              )}
 
               <button
                 onClick={handleLogout}
@@ -4291,12 +4370,14 @@ export default function Home() {
                 </p>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    onClick={openAddForm}
-                    className="px-4 py-2 rounded-xl bg-white text-blue-800 font-semibold text-sm shadow-sm hover:bg-blue-50 transition"
-                  >
-                    ＋ कार्यक्रम जोड़ें
-                  </button>
+                  {canAddProgram && (
+                    <button
+                      onClick={openAddForm}
+                      className="px-4 py-2 rounded-xl bg-white text-blue-800 font-semibold text-sm shadow-sm hover:bg-blue-50 transition"
+                    >
+                      ＋ कार्यक्रम जोड़ें
+                    </button>
+                  )}
                   <button
                     onClick={() => setActiveView("today")}
                     className="px-4 py-2 rounded-xl bg-white/10 border border-white/25 text-white font-semibold text-sm hover:bg-white/15 transition"
@@ -4468,12 +4549,14 @@ export default function Home() {
                         : "इस तारीख के लिए कोई कार्यक्रम नहीं है।"}
                     </p>
 
-                    <button
-                      onClick={openAddForm}
-                      className="mt-4 bg-blue-700 text-white px-5 py-3 rounded-xl font-semibold"
-                    >
-                      ＋ कार्यक्रम जोड़ें
-                    </button>
+                    {canAddProgram && (
+                      <button
+                        onClick={openAddForm}
+                        className="mt-4 bg-blue-700 text-white px-5 py-3 rounded-xl font-semibold"
+                      >
+                        ＋ कार्यक्रम जोड़ें
+                      </button>
+                    )}
 
                   </div>
 
