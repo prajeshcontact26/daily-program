@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "./lib/supabase";
 import { jsPDF } from "jspdf";
 import * as XLSX from "xlsx";
+import QRCode from "qrcode"
 
 type Program = {
   id: number;
@@ -67,6 +69,11 @@ const emptyForm = {
 };
 
 export default function Home() {
+  const router = useRouter();
+
+  const [authLoading, setAuthLoading] = useState(true);
+  const [userEmail, setUserEmail] = useState("");
+
   const [programs, setPrograms] = useState<Program[]>([]);
   const [selectedDate, setSelectedDate] = useState("");
 
@@ -83,6 +90,9 @@ export default function Home() {
 
 
   const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("सभी");
+  const [rangeFromDate, setRangeFromDate] = useState("");
+  const [rangeToDate, setRangeToDate] = useState("");
 
   const [activeView, setActiveView] = useState<
     "dashboard" | "today" | "upcoming" | "past"
@@ -90,6 +100,10 @@ export default function Home() {
 
   // STEP 7.4
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const [qrProgram, setQrProgram] = useState<Program | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [qrLoading, setQrLoading] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -201,9 +215,80 @@ export default function Home() {
     }
   };
 
+  // =========================================================
+  // AUTHENTICATION CHECK
+  // =========================================================
+
   useEffect(() => {
-    loadPrograms();
-  }, []);
+    let mounted = true;
+
+    const checkAuth = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!mounted) return;
+
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
+
+      setUserEmail(session.user.email || "");
+      setAuthLoading(false);
+    };
+
+    checkAuth();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
+
+      setUserEmail(session.user.email || "");
+      setAuthLoading(false);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [router]);
+
+  // =========================================================
+  // LOAD PROGRAMS AFTER LOGIN
+  // =========================================================
+
+  useEffect(() => {
+    if (!authLoading) {
+      loadPrograms();
+    }
+  }, [authLoading]);
+
+  // =========================================================
+  // LOGOUT
+  // =========================================================
+
+  const handleLogout = async () => {
+    const confirmed = window.confirm(
+      "क्या आप Logout करना चाहते हैं?"
+    );
+
+    if (!confirmed) return;
+
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      console.error(error);
+      alert("Logout नहीं हो सका।");
+      return;
+    }
+
+    router.replace("/login");
+  };
 
   useEffect(() => {
     // Date बदलने पर पुराने selected programs हटाएँ।
@@ -280,20 +365,88 @@ export default function Home() {
     });
 
   // =========================================================
+  // ADVANCED SEARCH / FILTER
+  // =========================================================
+
+  const isWithinDateRange = (program: Program) => {
+    if (!rangeFromDate && !rangeToDate) return true;
+
+    if (rangeFromDate && program.program_date < rangeFromDate) {
+      return false;
+    }
+
+    if (rangeToDate && program.program_date > rangeToDate) {
+      return false;
+    }
+
+    return true;
+  };
+
+  const matchesProgramFilter = (program: Program) => {
+    if (!isWithinDateRange(program)) return false;
+
+    const searchText = search.trim().toLowerCase();
+
+    const searchableText = [
+      program.title,
+      program.sender_name,
+      program.location,
+      program.category,
+      program.district,
+      program.state,
+      program.mobile_number,
+      program.groom_name,
+      program.bride_name,
+      program.deceased_name,
+      program.address1,
+      program.address2,
+      program.address3,
+      program.description,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    const matchesSearch =
+      !searchText || searchableText.includes(searchText);
+
+    const matchesCategory =
+      categoryFilter === "सभी" ||
+      program.category === categoryFilter;
+
+    return matchesSearch && matchesCategory;
+  };
+
+  // =========================================================
   // SELECTED DATE PROGRAMS
   // =========================================================
 
   const selectedPrograms = useMemo(() => {
     return programs
       .filter((program) => program.program_date === selectedDate)
-      .filter((program) => {
-        const text =
-          `${program.title} ${program.location} ${program.category}`.toLowerCase();
-
-        return text.includes(search.toLowerCase());
-      })
+      .filter(matchesProgramFilter)
       .sort((a, b) => a.program_time.localeCompare(b.program_time));
-  }, [programs, selectedDate, search]);
+  }, [
+    programs,
+    selectedDate,
+    search,
+    categoryFilter,
+    rangeFromDate,
+    rangeToDate,
+  ]);
+
+  // Filtered lists for Today / Upcoming / Past views.
+  const filteredTodayPrograms = useMemo(() => {
+    return todayPrograms.filter(matchesProgramFilter);
+  }, [todayPrograms, search, categoryFilter, rangeFromDate, rangeToDate]);
+
+  const filteredUpcomingPrograms = useMemo(() => {
+    return upcomingPrograms.filter(matchesProgramFilter);
+  }, [upcomingPrograms, search, categoryFilter, rangeFromDate, rangeToDate]);
+
+  const filteredPastPrograms = useMemo(() => {
+    return pastPrograms.filter(matchesProgramFilter);
+  }, [pastPrograms, search, categoryFilter, rangeFromDate, rangeToDate]);
 
   // =========================================================
   // ALL PROGRAMS FOR SELECTED DATE (PDF)
@@ -2949,6 +3102,79 @@ export default function Home() {
     }
   };
 
+  const getProgramShareUrl = (program: Program) => {
+    if (typeof window === "undefined") return "";
+    return `${window.location.origin}/program/${program.id}`;
+  };
+
+  const openProgramQr = async (program: Program) => {
+    try {
+      setQrProgram(program);
+      setQrLoading(true);
+      setQrDataUrl("");
+
+      const shareUrl = getProgramShareUrl(program);
+      const dataUrl = await QRCode.toDataURL(shareUrl, {
+        width: 520,
+        margin: 2,
+        errorCorrectionLevel: "H",
+      });
+
+      setQrDataUrl(dataUrl);
+    } catch (error) {
+      console.error(error);
+      alert("QR Code नहीं बन सका। कृपया फिर से प्रयास करें।");
+      setQrProgram(null);
+    } finally {
+      setQrLoading(false);
+    }
+  };
+
+  const downloadProgramQr = () => {
+    if (!qrDataUrl || !qrProgram) return;
+    const link = document.createElement("a");
+    link.href = qrDataUrl;
+    link.download = `Program-QR-${qrProgram.id}.png`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  const shareProgramQr = async () => {
+    if (!qrDataUrl || !qrProgram) return;
+    const shareUrl = getProgramShareUrl(qrProgram);
+
+    try {
+      const response = await fetch(qrDataUrl);
+      const blob = await response.blob();
+      const file = new File([blob], `Program-QR-${qrProgram.id}.png`, { type: "image/png" });
+
+      if (navigator.share) {
+        const shareData: ShareData = {
+          title: qrProgram.title,
+          text: `कार्यक्रम की जानकारी देखने के लिए QR Code स्कैन करें: ${qrProgram.title}`,
+          url: shareUrl,
+        };
+        if (navigator.canShare?.({ files: [file] })) {
+          shareData.files = [file];
+        }
+        await navigator.share(shareData);
+        return;
+      }
+
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(shareUrl);
+        alert("Direct Share उपलब्ध नहीं है। कार्यक्रम का link clipboard में copy हो गया है।");
+      } else {
+        alert("Direct Share उपलब्ध नहीं है। QR को Download करके share करें।");
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      console.error(error);
+      alert("Share नहीं हो सका। QR को Download करके WhatsApp या अन्य माध्यम से share करें।");
+    }
+  };
+
   // =========================================================
   // PROGRAM CARD
   // =========================================================
@@ -3051,6 +3277,14 @@ export default function Home() {
 
           <div className="flex flex-wrap gap-2 shrink-0">
 
+            <button
+              onClick={() => openProgramQr(program)}
+              className="px-3 py-2 rounded-lg border border-emerald-300 hover:bg-emerald-50 text-emerald-700 font-semibold text-sm"
+              title="इस कार्यक्रम का QR Code बनाएं और share करें"
+            >
+              📱 QR / Share
+            </button>
+
             {program.category === "वैवाहिक" && (
               <button
                 onClick={() => downloadMessagePdf(program, "marriage")}
@@ -3087,6 +3321,44 @@ export default function Home() {
 
           </div>
 
+        </div>
+      </div>
+    );
+  };
+
+  const ProgramQrModal = () => {
+    if (!qrProgram) return null;
+
+    return (
+      <div className="fixed inset-0 z-[100] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden">
+          <div className="px-5 py-4 border-b bg-gradient-to-r from-emerald-50 to-white flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-bold text-slate-800">📱 कार्यक्रम QR / Share</h3>
+              <p className="text-xs text-slate-500 mt-1">QR स्कैन करने पर इस कार्यक्रम की जानकारी खुलेगी।</p>
+            </div>
+            <button onClick={() => setQrProgram(null)} className="w-9 h-9 rounded-full border border-slate-200 text-slate-500 hover:bg-slate-100 text-xl" title="बंद करें">×</button>
+          </div>
+
+          <div className="p-5">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-center">
+              <p className="font-bold text-slate-800">{qrProgram.title}</p>
+              <p className="text-sm text-slate-500 mt-1">{formatShortDate(qrProgram.program_date)} • {formatTime(qrProgram.program_time)}</p>
+
+              {qrLoading ? (
+                <div className="h-64 flex items-center justify-center text-slate-500">QR Code बनाया जा रहा है...</div>
+              ) : qrDataUrl ? (
+                <img src={qrDataUrl} alt="कार्यक्रम QR Code" className="w-64 h-64 mx-auto mt-4 bg-white p-3 rounded-2xl border border-slate-200" />
+              ) : null}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+              <button onClick={shareProgramQr} disabled={qrLoading || !qrDataUrl} className="px-4 py-3 rounded-xl bg-emerald-700 text-white font-bold hover:bg-emerald-800 disabled:opacity-50">📤 Share QR</button>
+              <button onClick={downloadProgramQr} disabled={qrLoading || !qrDataUrl} className="px-4 py-3 rounded-xl border border-blue-300 text-blue-700 font-bold hover:bg-blue-50 disabled:opacity-50">⬇️ QR Download</button>
+            </div>
+
+            <p className="text-xs text-slate-500 text-center mt-3">QR को बाद में भी download करके WhatsApp, Email या अन्य माध्यम से share किया जा सकता है।</p>
+          </div>
         </div>
       </div>
     );
@@ -3187,7 +3459,7 @@ export default function Home() {
     };
 
     return (
-      <section className="bg-white rounded-2xl border shadow-sm overflow-hidden mb-5">
+      <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-5 hover:shadow-md transition-shadow">
 
         {/* HEADER */}
 
@@ -3408,12 +3680,12 @@ export default function Home() {
 
   const UpcomingTimeline = () => {
 
-    if (upcomingPrograms.length === 0) {
+    if (filteredUpcomingPrograms.length === 0) {
 
       return (
-        <section className="bg-white rounded-2xl border shadow-sm overflow-hidden mb-5">
+        <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-5 hover:shadow-md transition-shadow">
 
-          <div className="p-5 border-b bg-slate-50">
+          <div className="p-5 border-b bg-gradient-to-r from-slate-50 to-blue-50/50">
 
             <h2 className="text-xl font-bold text-slate-800">
               📌 आगामी कार्यक्रम
@@ -3449,7 +3721,7 @@ export default function Home() {
     }
 
     return (
-      <section className="bg-white rounded-2xl border shadow-sm overflow-hidden mb-5">
+      <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-5 hover:shadow-md transition-shadow">
 
         {/* HEADER */}
 
@@ -3470,7 +3742,7 @@ export default function Home() {
             </div>
 
             <div className="bg-blue-100 text-blue-700 px-3 py-2 rounded-xl text-xs md:text-sm font-bold whitespace-nowrap">
-              {upcomingPrograms.length} कार्यक्रम
+              {filteredUpcomingPrograms.length} कार्यक्रम
             </div>
 
           </div>
@@ -3481,14 +3753,14 @@ export default function Home() {
 
         <div className="p-4 md:p-5">
 
-          {upcomingPrograms.map((program, index) => {
+          {filteredUpcomingPrograms.map((program, index) => {
 
             const currentDate =
               program.program_date;
 
             const previousDate =
               index > 0
-                ? upcomingPrograms[index - 1].program_date
+                ? filteredUpcomingPrograms[index - 1].program_date
                 : null;
 
             const showDate =
@@ -3525,7 +3797,7 @@ export default function Home() {
 
                   {/* LINE */}
 
-                  {index !== upcomingPrograms.length - 1 && (
+                  {index !== filteredUpcomingPrograms.length - 1 && (
 
                     <div className="absolute left-[10px] md:left-[11px] top-4 bottom-0 w-[2px] bg-blue-100"></div>
 
@@ -3634,8 +3906,25 @@ export default function Home() {
   // RETURN
   // =========================================================
 
+  if (authLoading) {
+    return (
+      <main className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
+        <div className="bg-white rounded-2xl shadow-lg border p-8 text-center max-w-sm w-full">
+          <div className="text-4xl mb-3">🔐</div>
+          <h1 className="text-xl font-bold text-slate-800">
+            Login verify हो रहा है...
+          </h1>
+          <p className="text-sm text-slate-500 mt-2">
+            कृपया प्रतीक्षा करें
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-slate-100 text-slate-900">
+    <>
+      <main className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-blue-50/40 text-slate-900">
 
       {/* =====================================================
           HIDDEN DATE-WISE PDF REPORT
@@ -3645,7 +3934,7 @@ export default function Home() {
           TOP HEADER - STEP 7.4
       ====================================================== */}
 
-      <header className="bg-white border-b shadow-sm sticky top-0 z-40">
+      <header className="bg-white/95 backdrop-blur border-b border-slate-200 shadow-sm sticky top-0 z-40">
 
         <div className="max-w-7xl mx-auto px-4 md:px-5 py-3 md:py-4 flex items-center justify-between">
 
@@ -3653,7 +3942,7 @@ export default function Home() {
 
           <div className="flex items-center gap-3 min-w-0">
 
-            <div className="w-10 h-10 md:w-11 md:h-11 shrink-0 rounded-xl bg-blue-700 text-white flex items-center justify-center text-lg md:text-xl font-bold shadow-sm">
+            <div className="w-10 h-10 md:w-11 md:h-11 shrink-0 rounded-xl bg-gradient-to-br from-blue-700 to-indigo-700 text-white flex items-center justify-center text-lg md:text-xl font-bold shadow-md ring-2 ring-blue-100">
               DP
             </div>
 
@@ -3687,6 +3976,23 @@ export default function Home() {
               className="bg-blue-700 hover:bg-blue-800 text-white px-5 py-3 rounded-xl font-semibold shadow-sm transition"
             >
               ＋ नया कार्यक्रम
+            </button>
+            <button
+              onClick={() => router.push("/admin-users")}
+              className="bg-violet-600 hover:bg-violet-700 text-white px-5 py-3 rounded-xl font-semibold shadow-sm transition"
+              title="User Management"
+            >
+              👥 Users
+            </button>
+
+
+
+            <button
+              onClick={handleLogout}
+              className="bg-red-600 hover:bg-red-700 text-white px-5 py-3 rounded-xl font-semibold shadow-sm transition"
+              title={userEmail || "Logout"}
+            >
+              🚪 Logout
             </button>
 
           </div>
@@ -3817,6 +4123,14 @@ export default function Home() {
               <div className="border-t my-5"></div>
 
               {/* EXCEL IMPORT */}
+            <button
+              onClick={() => router.push("/admin-users")}
+              className="w-full text-left px-4 py-3 rounded-xl font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-100 transition"
+            >
+              👥 User Management
+            </button>
+
+
 
               <button
                 onClick={openExcelImport}
@@ -3832,6 +4146,24 @@ export default function Home() {
                 className="w-full bg-blue-700 hover:bg-blue-800 text-white px-4 py-3.5 rounded-xl font-semibold shadow-sm transition"
               >
                 ＋ नया कार्यक्रम
+              </button>
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  router.push("/admin-users");
+                }}
+                className="w-full bg-violet-600 hover:bg-violet-700 text-white px-4 py-3.5 rounded-xl font-semibold shadow-sm transition mt-2"
+              >
+                👥 User Management
+              </button>
+
+
+
+              <button
+                onClick={handleLogout}
+                className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-3.5 rounded-xl font-semibold shadow-sm transition mt-2"
+              >
+                🚪 Logout
               </button>
 
             </div>
@@ -3864,7 +4196,7 @@ export default function Home() {
 
         <aside className="hidden md:block md:w-64 shrink-0 p-4">
 
-          <div className="bg-white rounded-2xl border shadow-sm p-3 md:sticky md:top-20">
+          <div className="bg-white/95 rounded-2xl border border-slate-200 shadow-sm p-3 md:sticky md:top-20 backdrop-blur">
 
             <p className="text-xs font-bold text-slate-400 uppercase px-3 py-2">
               मुख्य मेनू
@@ -3944,7 +4276,7 @@ export default function Home() {
 
               {/* TODAY HERO */}
 
-              <div className="bg-gradient-to-r from-blue-700 to-indigo-700 rounded-2xl p-5 md:p-6 text-white shadow-lg mb-5">
+              <div className="relative overflow-hidden bg-gradient-to-br from-blue-800 via-blue-700 to-indigo-800 rounded-2xl p-5 md:p-7 text-white shadow-lg mb-5 ring-1 ring-blue-900/10">
 
                 <p className="text-blue-100 text-sm">
                   आज का दिन
@@ -3958,13 +4290,34 @@ export default function Home() {
                   आज के सभी निर्धारित कार्यक्रम यहाँ देखें।
                 </p>
 
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    onClick={openAddForm}
+                    className="px-4 py-2 rounded-xl bg-white text-blue-800 font-semibold text-sm shadow-sm hover:bg-blue-50 transition"
+                  >
+                    ＋ कार्यक्रम जोड़ें
+                  </button>
+                  <button
+                    onClick={() => setActiveView("today")}
+                    className="px-4 py-2 rounded-xl bg-white/10 border border-white/25 text-white font-semibold text-sm hover:bg-white/15 transition"
+                  >
+                    📅 आज की सूची
+                  </button>
+                  <button
+                    onClick={() => setActiveView("upcoming")}
+                    className="px-4 py-2 rounded-xl bg-white/10 border border-white/25 text-white font-semibold text-sm hover:bg-white/15 transition"
+                  >
+                    📌 आगामी
+                  </button>
+                </div>
+
               </div>
 
               {/* STATS */}
 
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-5">
 
-                <div className="bg-white rounded-2xl p-4 md:p-5 border shadow-sm">
+                <div className="bg-white rounded-2xl p-4 md:p-5 border border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
 
                   <p className="text-xs md:text-sm text-slate-500">
                     आज के कार्यक्रम
@@ -3976,7 +4329,7 @@ export default function Home() {
 
                 </div>
 
-                <div className="bg-white rounded-2xl p-4 md:p-5 border shadow-sm">
+                <div className="bg-white rounded-2xl p-4 md:p-5 border border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
 
                   <p className="text-xs md:text-sm text-slate-500">
                     नागरिक भेंट
@@ -3988,7 +4341,7 @@ export default function Home() {
 
                 </div>
 
-                <div className="bg-white rounded-2xl p-4 md:p-5 border shadow-sm">
+                <div className="bg-white rounded-2xl p-4 md:p-5 border border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
 
                   <p className="text-xs md:text-sm text-slate-500">
                     कार्यालयीन कार्य
@@ -4000,7 +4353,7 @@ export default function Home() {
 
                 </div>
 
-                <div className="bg-white rounded-2xl p-4 md:p-5 border shadow-sm">
+                <div className="bg-white rounded-2xl p-4 md:p-5 border border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
 
                   <p className="text-xs md:text-sm text-slate-500">
                     बैठक
@@ -4024,9 +4377,9 @@ export default function Home() {
 
               {/* TODAY / SELECTED DATE */}
 
-              <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
-                <div className="px-4 md:px-5 py-4 border-b flex items-center justify-between">
+                <div className="px-4 md:px-5 py-4 border-b bg-gradient-to-r from-white to-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
 
                   <div>
 
@@ -4049,7 +4402,7 @@ export default function Home() {
                     <button
                       onClick={toggleSelectAllForDate}
                       disabled={selectedPrograms.length === 0}
-                      className="border border-slate-300 text-slate-700 px-3 py-2 rounded-lg hover:bg-slate-50 disabled:opacity-50 font-semibold text-sm"
+                      className="border border-slate-300 text-slate-700 px-3 py-2 rounded-xl hover:bg-slate-100 disabled:opacity-50 font-semibold text-sm transition"
                       title="इस तारीख के सभी कार्यक्रम Select/Unselect करें"
                     >
                       {selectedPrograms.length > 0 &&
@@ -4075,7 +4428,7 @@ export default function Home() {
                         selectedProgramsPdfLoading ||
                         selectedProgramIds.length === 0
                       }
-                      className="border border-emerald-300 text-emerald-700 px-3 md:px-4 py-2 rounded-lg hover:bg-emerald-50 disabled:opacity-60 font-semibold"
+                      className="border border-emerald-300 text-emerald-700 bg-emerald-50/50 px-3 md:px-4 py-2 rounded-xl hover:bg-emerald-100 disabled:opacity-60 font-semibold transition"
                       title="Selected programs को एक ही PDF में डाउनलोड करें"
                     >
                       {selectedProgramsPdfLoading
@@ -4086,7 +4439,7 @@ export default function Home() {
                     <button
                       onClick={downloadDatePdf}
                       disabled={pdfLoading}
-                      className="border border-blue-300 text-blue-700 px-3 md:px-4 py-2 rounded-lg hover:bg-blue-50 disabled:opacity-60 font-semibold"
+                      className="border border-blue-300 text-blue-700 bg-blue-50/50 px-3 md:px-4 py-2 rounded-xl hover:bg-blue-100 disabled:opacity-60 font-semibold transition"
                       title="इस तारीख की PDF डाउनलोड करें"
                     >
                       {pdfLoading ? "⏳" : "📄 PDF"}
@@ -4148,9 +4501,9 @@ export default function Home() {
 
           {activeView === "today" && (
 
-            <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
-              <div className="p-5 border-b">
+              <div className="p-5 md:p-6 border-b bg-gradient-to-r from-white to-slate-50">
 
                 <h2 className="text-xl md:text-2xl font-bold">
                   📅 आज का कार्यक्रम
@@ -4162,7 +4515,7 @@ export default function Home() {
 
               </div>
 
-              {todayPrograms.length === 0 ? (
+              {filteredTodayPrograms.length === 0 ? (
 
                 <div className="p-12 text-center text-slate-500">
                   कोई कार्यक्रम नहीं है।
@@ -4170,7 +4523,7 @@ export default function Home() {
 
               ) : (
 
-                todayPrograms.map((program) => (
+                filteredTodayPrograms.map((program) => (
                   <ProgramCard
                     key={program.id}
                     program={program}
@@ -4189,9 +4542,9 @@ export default function Home() {
 
           {activeView === "upcoming" && (
 
-            <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
-              <div className="p-5 border-b">
+              <div className="p-5 md:p-6 border-b bg-gradient-to-r from-white to-slate-50">
 
                 <h2 className="text-xl md:text-2xl font-bold">
                   ➡️ आगामी कार्यक्रम
@@ -4203,7 +4556,7 @@ export default function Home() {
 
               </div>
 
-              {upcomingPrograms.length === 0 ? (
+              {filteredUpcomingPrograms.length === 0 ? (
 
                 <div className="p-12 text-center text-slate-500">
                   कोई आगामी कार्यक्रम नहीं है।
@@ -4211,7 +4564,7 @@ export default function Home() {
 
               ) : (
 
-                upcomingPrograms.map((program) => (
+                filteredUpcomingPrograms.map((program) => (
 
                   <div
                     key={program.id}
@@ -4244,9 +4597,9 @@ export default function Home() {
 
           {activeView === "past" && (
 
-            <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
-              <div className="p-5 border-b">
+              <div className="p-5 md:p-6 border-b bg-gradient-to-r from-white to-slate-50">
 
                 <h2 className="text-xl md:text-2xl font-bold">
                   ⬅️ पुराने कार्यक्रम
@@ -4258,7 +4611,7 @@ export default function Home() {
 
               </div>
 
-              {pastPrograms.length === 0 ? (
+              {filteredPastPrograms.length === 0 ? (
 
                 <div className="p-12 text-center text-slate-500">
                   कोई पुराना कार्यक्रम नहीं है।
@@ -4266,7 +4619,7 @@ export default function Home() {
 
               ) : (
 
-                pastPrograms.map((program) => (
+                filteredPastPrograms.map((program) => (
 
                   <div
                     key={program.id}
@@ -4297,12 +4650,36 @@ export default function Home() {
               DATE SEARCH
           ================================================== */}
 
-          <div className="bg-white rounded-2xl border shadow-sm p-4 md:p-5 mt-5">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 md:p-5 mt-5">
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
+            <div className="flex items-center justify-between gap-3 mb-4">
               <div>
+                <h3 className="text-base md:text-lg font-bold text-slate-800">
+                  🔎 Advanced Search & Filter
+                </h3>
+                <p className="text-xs md:text-sm text-slate-500 mt-1">
+                  नाम, कार्यक्रम, स्थान, मोबाइल, जिला, राज्य, वर, वधु या मृतक के नाम से खोजें।
+                </p>
+              </div>
 
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch("");
+                  setCategoryFilter("सभी");
+                  setRangeFromDate("");
+                  setRangeToDate("");
+                }}
+                className="shrink-0 px-3 md:px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs md:text-sm font-semibold"
+              >
+                🔄 Clear Filter
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+
+              {/* Selected Date */}
+              <div>
                 <label className="block text-sm font-semibold mb-2">
                   📅 किसी तारीख का कार्यक्रम
                 </label>
@@ -4316,26 +4693,157 @@ export default function Home() {
                   }}
                   className="w-full border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
                 />
-
               </div>
 
+              {/* Search */}
               <div>
-
                 <label className="block text-sm font-semibold mb-2">
                   🔍 कार्यक्रम खोजें
                 </label>
 
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="कार्यक्रम, स्थान या श्रेणी..."
-                  className="w-full border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="नाम, कार्यक्रम, स्थान, मोबाइल..."
+                    className="w-full border rounded-xl px-4 py-3 pr-10 outline-none focus:ring-2 focus:ring-blue-500"
+                  />
 
+                  {search && (
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 text-lg font-bold"
+                      title="Search साफ करें"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Category */}
+              <div>
+                <label className="block text-sm font-semibold mb-2">
+                  🏷️ श्रेणी
+                </label>
+
+                <select
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  className="w-full border rounded-xl px-4 py-3 bg-white outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="सभी">सभी श्रेणियां</option>
+                  <option value="नागरिक भेंट">नागरिक भेंट</option>
+                  <option value="कार्यालयीन कार्य">कार्यालयीन कार्य</option>
+                  <option value="कार्यक्रम">कार्यक्रम</option>
+                  <option value="बैठक">बैठक</option>
+                  <option value="दौरा">दौरा</option>
+                  <option value="निरीक्षण">निरीक्षण</option>
+                  <option value="शासकीय">शासकीय</option>
+                  <option value="पार्टी">पार्टी</option>
+                  <option value="धार्मिक">धार्मिक</option>
+                  <option value="वैवाहिक">वैवाहिक</option>
+                  <option value="शोक">शोक</option>
+                  <option value="अन्य">अन्य</option>
+                </select>
+              </div>
+
+              {/* Result */}
+              <div className="flex flex-col justify-end">
+                <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3">
+                  <div className="text-xs text-slate-500">
+                    चयनित तारीख में कुल मिले
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-2xl font-bold text-blue-700">
+                      {selectedPrograms.length}
+                    </span>
+                    <span className="text-sm font-semibold text-slate-600">
+                      कार्यक्रम
+                    </span>
+                  </div>
+                </div>
               </div>
 
             </div>
+
+            {/* Date Range */}
+            <div className="mt-4 pt-4 border-t border-slate-200">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-sm font-bold text-slate-700">
+                  📆 Date Range Filter
+                </span>
+                <span className="text-xs text-slate-500">
+                  (वैकल्पिक)
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-2">
+                    From Date
+                  </label>
+                  <input
+                    type="date"
+                    value={rangeFromDate}
+                    max={rangeToDate || undefined}
+                    onChange={(e) => setRangeFromDate(e.target.value)}
+                    className="w-full border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-2">
+                    To Date
+                  </label>
+                  <input
+                    type="date"
+                    value={rangeToDate}
+                    min={rangeFromDate || undefined}
+                    onChange={(e) => setRangeToDate(e.target.value)}
+                    className="w-full border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {(search.trim() || categoryFilter !== "सभी" || rangeFromDate || rangeToDate) && (
+              <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-bold text-slate-600">फ़िल्टर सक्रिय:</span>
+
+                {search.trim() && (
+                  <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
+                    🔍 {search}
+                  </span>
+                )}
+
+                {categoryFilter !== "सभी" && (
+                  <span className="px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">
+                    🏷️ {categoryFilter}
+                  </span>
+                )}
+
+                {rangeFromDate && (
+                  <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">
+                    From: {formatShortDate(rangeFromDate)}
+                  </span>
+                )}
+
+                {rangeToDate && (
+                  <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">
+                    To: {formatShortDate(rangeToDate)}
+                  </span>
+                )}
+
+                {selectedProgramIds.length > 0 && (
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 font-semibold">
+                    ✓ {selectedProgramIds.length} चयनित
+                  </span>
+                )}
+              </div>
+            )}
 
           </div>
 
@@ -5014,10 +5522,10 @@ export default function Home() {
                 className="px-4 md:px-5 py-3 rounded-xl bg-blue-700 text-white font-semibold disabled:opacity-60"
               >
                 {saving
-                  ? "Saving..."
+                  ? "सहेजा जा रहा है..."
                   : editingId !== null
-                  ? "Update"
-                  : "Save Program"}
+                  ? "परिवर्तन सहेजें"
+                  : "कार्यक्रम सहेजें"}
               </button>
 
             </div>
@@ -5027,6 +5535,17 @@ export default function Home() {
         </div>
 
       )}
+
+      {/* =====================================================
+          FOOTER
+      ====================================================== */}
+
+      <footer className="mt-8 border-t border-slate-200 bg-white/80">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
+          <span>दैनिक कार्यक्रम प्रबंधन प्रणाली</span>
+          <span>सुरक्षित • डिजिटल • कार्यालयीन उपयोग</span>
+        </div>
+      </footer>
 
       {/* =====================================================
           PRINT
@@ -5054,6 +5573,8 @@ export default function Home() {
         }
       `}</style>
 
-    </main>
+      </main>
+      <ProgramQrModal />
+    </>
   );
 }
